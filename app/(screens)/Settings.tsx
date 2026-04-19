@@ -222,7 +222,7 @@ export default function Settings() {
         <ThemedText style={{ fontSize: 20, marginLeft: 5, height: 40, alignItems: "center", alignContent: "center", alignSelf: "center", borderTopWidth: 1, borderColor: "gray", paddingTop:5 }}>Es todo por el momento</ThemedText>
         </View>
         <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <ThemedText onLongPress={() => setIsTextVisible(!isTextVisible)} style={{ fontSize: 10, height: 40, alignItems: "center", alignContent: "center", alignSelf: "center" }}>Emperblack | v1.2.0  </ThemedText>
+          <ThemedText onLongPress={() => setIsTextVisible(!isTextVisible)} style={{ fontSize: 10, height: 40, alignItems: "center", alignContent: "center", alignSelf: "center" }}>Emperblack | v1.3.0  </ThemedText>
       </View>
 
     <BottomSheetModal

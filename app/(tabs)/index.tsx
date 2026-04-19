@@ -155,18 +155,19 @@ export default function Inicio() {
           position: "absolute",
           zIndex: 20,
           bottom: 30,
-          right: 30,
+          right: 20,
           backgroundColor: "#5c6bf2",
-          borderRadius: 50,
-          width: 50,
-          height: 50,
+          borderRadius: 28,
+          width: 56,
+          height: 56,
           justifyContent: "center",
           alignItems: "center",
           shadowColor: "#000",
           shadowOpacity: 0.3,
           shadowOffset: { width: 0, height: 3 },
           shadowRadius: 6,
-          elevation: 6,
+          elevation: 8,
+
         }}
       >
         <Ionicons name="add" size={30} color="white" />

@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Konta",
+    "slug": "Konta",
+    "version": "1.2.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "konta",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "ios": {
+      "supportsTablet": true,
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#111111"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.cesar1357.konta",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [],
+      "runtimeVersion": "1.2.0"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#111111"
+        }
+      ],
+      "expo-font",
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c1fead5b-2ca8-483f-89f5-794a158fc281"
+      }
+    },
+    "owner": "cesar1357",
+    "updates": {
+      "url": "https://u.expo.dev/c1fead5b-2ca8-483f-89f5-794a158fc281"
+    }
+  }
+}

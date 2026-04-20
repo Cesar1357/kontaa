@@ -83,8 +83,8 @@ exports.sendTestPush = functions.https.onRequest(async (req, res) => {
       return res.status(404).json({ error: 'User has no pushToken' });
     }
 
-    const title = '🧪 Prueba de notificación';
-    const body = 'Esta es una notificación de prueba desde Firebase Functions.';
+    const title = 'Hola';
+    const body = 'Sigues ahí?';
 
     const sent = await sendPushNotification(pushToken, title, body, {
       type: 'test',

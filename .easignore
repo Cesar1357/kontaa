@@ -1,0 +1,2 @@
+# Include google-services.json for EAS builds
+!android/app/src/release/google-services.json

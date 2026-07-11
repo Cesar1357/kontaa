@@ -35,6 +35,7 @@ import {
   View,
 } from "react-native";
 import { FlatList } from "react-native-gesture-handler";
+import DateTimePickerModal from "react-native-modal-datetime-picker";
 import Animated, { Layout } from "react-native-reanimated";
 import { RFValue } from "react-native-responsive-fontsize";
 /**
@@ -50,6 +51,12 @@ import { RFValue } from "react-native-responsive-fontsize";
 
 export default function AhorrosScreen() {
   const { user } = useAuth();
+  type PlazoAhorro = "corto" | "mediano" | "largo";
+  const PLAZO_DIAS: Record<PlazoAhorro, number> = {
+    corto: 30,
+    mediano: 365,
+    largo: 730,
+  };
   const [ahorros, setAhorros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [subscriptionActive, setSubscriptionActive] = useState(false);
@@ -61,7 +68,9 @@ export default function AhorrosScreen() {
   const [nombre, setNombre] = useState("");
   const [meta, setMeta] = useState("");
   const [descripcion, setDescripcion] = useState("");
+  const [plazo, setPlazo] = useState<PlazoAhorro | null>(null);
   const [fechaLimite, setFechaLimite] = useState<string | null>(null); // ISO string optional
+  const [isDatePickerVisible, setDatePickerVisible] = useState(false);
 
   // detalle modal
   const [showDetalle, setShowDetalle] = useState(false);
@@ -161,6 +170,7 @@ export default function AhorrosScreen() {
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
+    width: "32%",
   },
    modalContainer: {
     flex: 1,
@@ -228,6 +238,47 @@ export default function AhorrosScreen() {
   const fmt = (n: number) =>
     n?.toLocaleString?.("es-MX", { maximumFractionDigits: 2, minimumFractionDigits: 0 }) ?? "0";
 
+  const labelPlazo = (p?: string | null) => {
+    if (p === "corto") return "Corto plazo";
+    if (p === "mediano") return "Mediano plazo";
+    if (p === "largo") return "Largo plazo";
+    return "Sin plazo";
+  };
+
+  const parseFecha = (value: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const parsed = new Date(`${value}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const toIsoDate = (date: Date) => {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const abrirNuevo = () => {
+    setSelected(null);
+    setNombre("");
+    setMeta("");
+    setDescripcion("");
+    setPlazo(null);
+    setFechaLimite(null);
+    setCantidadActual(0);
+    setEditando(false);
+    setShowNuevo(true);
+  };
+
+  const openFechaPicker = () => {
+    setDatePickerVisible(true);
+  };
+
+  const handleFechaConfirm = (date: Date) => {
+    setDatePickerVisible(false);
+    setFechaLimite(toIsoDate(date));
+  };
+
   // Crear nuevo ahorro
   const guardarNuevo = async () => {
     const userId = (user as any)?.uid;
@@ -242,6 +293,31 @@ export default function AhorrosScreen() {
       Alert.alert("Error", "Pon un nombre para la meta.");
       return;
     }
+
+    if (!plazo && !fechaLimite) {
+      Alert.alert("Error", "Selecciona un plazo (corto, mediano o largo) o una fecha probable.");
+      return;
+    }
+
+    const now = new Date();
+    let fechaObjetivo: Date | null = null;
+    if (fechaLimite) {
+      const parsed = parseFecha(fechaLimite);
+      if (!parsed) {
+        Alert.alert("Error", "La fecha probable debe estar en formato AAAA-MM-DD.");
+        return;
+      }
+      if (parsed <= now) {
+        Alert.alert("Error", "La fecha probable debe ser futura.");
+        return;
+      }
+      fechaObjetivo = parsed;
+    } else if (plazo) {
+      const objetivo = new Date(now);
+      objetivo.setDate(objetivo.getDate() + PLAZO_DIAS[plazo]);
+      fechaObjetivo = objetivo;
+    }
+
     var metaNum = 0;
     if(meta !== ""){
         metaNum = parseFloat(meta.toString().replace(/,/g, ""));
@@ -259,6 +335,8 @@ export default function AhorrosScreen() {
           meta: meta === "" ? "" : metaNum,
           cantidadActual: cantidadActual,
           descripcion: descripcion || "",
+          plazo: plazo,
+          fechaLimite: fechaObjetivo ? Timestamp.fromDate(fechaObjetivo) : null,
         });
         ToastAndroid.show("Meta actualizada", ToastAndroid.SHORT);
       } else {
@@ -268,8 +346,9 @@ export default function AhorrosScreen() {
           meta: meta === "" ? "" : metaNum,
           cantidadActual: 0,
           descripcion: descripcion || "",
+          plazo: plazo,
           creado: serverTimestamp(),
-          fechaLimite: fechaLimite ? Timestamp.fromDate(new Date(fechaLimite)) : null,
+          fechaLimite: fechaObjetivo ? Timestamp.fromDate(fechaObjetivo) : null,
         });
         ToastAndroid.show("Meta creada", ToastAndroid.SHORT);
       }
@@ -278,6 +357,7 @@ export default function AhorrosScreen() {
       setNombre("");
       setMeta("");
       setDescripcion("");
+      setPlazo(null);
       setFechaLimite(null);
       setShowNuevo(false);
       setEditando(false);
@@ -440,6 +520,7 @@ export default function AhorrosScreen() {
     setNombre(a.nombre || "");
     setMeta(String(a.meta || ""));
     setDescripcion(a.descripcion || "");
+    setPlazo(a.plazo || null);
     setFechaLimite(a.fechaLimite ? new Date(a.fechaLimite.seconds * 1000).toISOString().slice(0, 10) : null);
     setShowNuevo(true);
     setEditando(true);
@@ -484,6 +565,12 @@ export default function AhorrosScreen() {
                       <ThemedText style={styles.cardSmall}>
                         {fmt(a.cantidadActual || 0)} / {a.meta === "" ? "∞" : fmt(a.meta || 0)}
                       </ThemedText>
+                      <ThemedText style={styles.cardSmall}>
+                        {labelPlazo(a.plazo)}
+                        {a.fechaLimite?.seconds
+                          ? ` • Fecha probable: ${new Date(a.fechaLimite.seconds * 1000).toLocaleDateString("es-MX")}`
+                          : ""}
+                      </ThemedText>
                     </View>
 
                     <View style={{ marginLeft: 10, alignItems: "flex-end" }}>
@@ -518,7 +605,7 @@ export default function AhorrosScreen() {
 
       {/* Botón flotante crear */}
       <TouchableOpacity
-        onPress={() => setShowNuevo(true)}
+        onPress={abrirNuevo}
         style={{
           position: "absolute",
           bottom: 30,
@@ -609,7 +696,7 @@ export default function AhorrosScreen() {
           <View style={styles.modalBack}>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalCard}>
               <ThemedText style={{ fontSize: 20, fontWeight: "700", marginBottom: 8 }}>
-                {selected ? "Editar meta" : "Nueva meta"}
+                {editando ? "Editar meta" : "Nueva meta"}
               </ThemedText>
 
               <TextInput
@@ -638,6 +725,62 @@ export default function AhorrosScreen() {
                 style={styles.input}
               />
 
+              <ThemedText style={{ fontSize: 13, fontWeight: "600", marginBottom: 6 }}>
+                Plazo
+              </ThemedText>
+              <View style={{ flexDirection: "row", marginBottom: 10, justifyContent: "center" }}>
+                <TouchableOpacity
+                  onPress={() => setPlazo("corto")}
+                  style={[
+                    styles.smallBtn,
+                    plazo === "corto" ? { backgroundColor: "#3edc81" } : { backgroundColor: "#2a2a2a" },
+                  ]}
+                >
+                  <Text style={{ color: plazo === "corto" ? "black" : "white" }}>Corto (1 mes)</Text>
+                </TouchableOpacity>
+
+                <View style={{ width: 8 }} />
+
+                <TouchableOpacity
+                  onPress={() => setPlazo("mediano")}
+                  style={[
+                    styles.smallBtn,
+                    plazo === "mediano" ? { backgroundColor: "#93c5fd" } : { backgroundColor: "#2a2a2a" },
+                  ]}
+                >
+                  <Text style={{ color: plazo === "mediano" ? "black" : "white" }}>Mediano (1 año)</Text>
+                </TouchableOpacity>
+
+                <View style={{ width: 8 }} />
+
+                <TouchableOpacity
+                  onPress={() => setPlazo("largo")}
+                  style={[
+                    styles.smallBtn,
+                    plazo === "largo" ? { backgroundColor: "#c084fc" } : { backgroundColor: "#2a2a2a" },
+                  ]}
+                >
+                  <Text style={{ color: plazo === "largo" ? "black" : "white" }}>Largo (2 años)</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                onPress={openFechaPicker}
+                style={[
+                  styles.input,
+                  {
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  },
+                ]}
+              >
+                <Text style={{ color: fechaLimite ? "white" : "#999" }}>
+                  {fechaLimite || "Fecha probable (opcional)"}
+                </Text>
+                <Ionicons name="calendar-outline" size={18} color="#999" />
+              </TouchableOpacity>
+
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                 <TouchableOpacity
                   onPress={() => {
@@ -645,6 +788,7 @@ export default function AhorrosScreen() {
                     setNombre("");
                     setMeta("");
                     setDescripcion("");
+                    setPlazo(null);
                     setFechaLimite(null);
                     setShowNuevo(false);
                     setEditando(false);
@@ -667,6 +811,14 @@ export default function AhorrosScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      <DateTimePickerModal
+        isVisible={isDatePickerVisible}
+        mode="date"
+        minimumDate={new Date()}
+        onConfirm={handleFechaConfirm}
+        onCancel={() => setDatePickerVisible(false)}
+      />
 
       {/* Modal detalle: depositar / retirar */}
       <Modal visible={showDetalle} transparent animationType="fade">

@@ -14,6 +14,23 @@ type SavingGoal = {
   nombre: string;
   meta: number;
   cantidadActual: number;
+  plazo?: 'corto' | 'mediano' | 'largo' | null;
+  fechaLimite?: any;
+  creado?: any;
+};
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+const toDate = (value: any): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value?.toDate === 'function') return value.toDate();
+  if (typeof value?.seconds === 'number') return new Date(value.seconds * 1000);
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
 };
 
 export default function MetaMensualCard() {
@@ -25,11 +42,12 @@ export default function MetaMensualCard() {
   const [goal, setGoal] = useState<SavingGoal | null>(null);
 
   useEffect(() => {
-    if (!user?.uid) return;
+    const userId = (user as any)?.uid;
+    if (!userId) return;
 
     const run = async () => {
       try {
-        const ref = collection(db, `users/${user.uid}/ahorros`);
+        const ref = collection(db, `users/${userId}/ahorros`);
         const snap = await getDocs(ref);
         const goals = snap.docs
           .map((d) => ({ id: d.id, ...(d.data() as any) }))
@@ -39,6 +57,9 @@ export default function MetaMensualCard() {
             nombre: String(item.nombre || 'Meta'),
             meta: Number(item.meta || 0),
             cantidadActual: Number(item.cantidadActual || 0),
+            plazo: item.plazo || null,
+            fechaLimite: item.fechaLimite || null,
+            creado: item.creado || null,
           }))
           .filter((item) => item.cantidadActual < item.meta)
           .sort((a, b) => (b.cantidadActual / b.meta) - (a.cantidadActual / a.meta));
@@ -52,7 +73,7 @@ export default function MetaMensualCard() {
     };
 
     run();
-  }, [user?.uid]);
+  }, [user]);
 
   const values = useMemo(() => {
     if (!goal) return null;
@@ -60,10 +81,24 @@ export default function MetaMensualCard() {
     const restante = Math.max(0, goal.meta - goal.cantidadActual);
     const progress = goal.meta > 0 ? Math.min(100, (goal.cantidadActual / goal.meta) * 100) : 0;
     const now = new Date();
-    const daysLeft = Math.max(1, new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate());
-    const dailyTarget = restante / daysLeft;
+    const fechaLimite = toDate(goal.fechaLimite);
+    let targetDate = fechaLimite;
 
-    return { restante, progress, dailyTarget };
+    if (!targetDate && goal.plazo) {
+      const creado = toDate(goal.creado) || now;
+      const daysByPlazo = goal.plazo === 'corto' ? 30 : goal.plazo === 'mediano' ? 365 : 730;
+      targetDate = new Date(creado.getTime() + daysByPlazo * DAY_MS);
+    }
+
+    if (!targetDate) {
+      targetDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    }
+
+    const daysLeft = Math.max(1, Math.ceil((targetDate.getTime() - now.getTime()) / DAY_MS));
+    const dailyTarget = restante / daysLeft;
+    const targetLabel = targetDate.toLocaleDateString('es-MX');
+
+    return { restante, progress, dailyTarget, targetLabel };
   }, [goal]);
 
   return (
@@ -84,7 +119,7 @@ export default function MetaMensualCard() {
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
         <Ionicons name="flag-outline" size={18} color={primaryColor} />
-        <ThemedText style={{ marginLeft: 8, fontSize: 15, fontWeight: '700' }}>Meta del mes</ThemedText>
+        <ThemedText style={{ marginLeft: 8, fontSize: 15, fontWeight: '700' }}>Meta de ahorro</ThemedText>
       </View>
 
       {loading ? (
@@ -99,6 +134,9 @@ export default function MetaMensualCard() {
           </ThemedText>
           <ThemedText style={{ fontSize: 12, marginBottom: 8 }}>
             Te faltan ${values.restante.toFixed(0)}. Ritmo recomendado: ${values.dailyTarget.toFixed(0)} por dia.
+          </ThemedText>
+          <ThemedText style={{ fontSize: 12, opacity: 0.78, marginBottom: 8 }}>
+            Objetivo calculado al {values.targetLabel}.
           </ThemedText>
           <TouchableOpacity
             onPress={() => router.push('/(tabs)/AhorrosScreen')}

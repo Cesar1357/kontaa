@@ -16,20 +16,33 @@ export default function RiesgoPresupuestoCard() {
   const [loading, setLoading] = useState(true);
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [monthlySpent, setMonthlySpent] = useState(0);
+  const [monthlyRecurringSpent, setMonthlyRecurringSpent] = useState(0);
+
+  const toMonthlyAmount = (item: any) => {
+    const amount = Number(item?.monto || 0);
+    const frecuencia = String(item?.frecuencia || 'mensual').toLowerCase();
+
+    if (frecuencia.includes('dia')) return amount * 30;
+    if (frecuencia.includes('sem')) return amount * 4.33;
+    if (frecuencia.includes('quin')) return amount * 2;
+    if (frecuencia.includes('an')) return amount / 12;
+    return amount;
+  };
 
   useEffect(() => {
-    if (!user?.uid) return;
+    const userId = (user as any)?.uid;
+    if (!userId) return;
 
     const run = async () => {
       try {
         const now = new Date();
         const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
 
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        const userDoc = await getDoc(doc(db, 'users', userId));
         const presupuestoMes = Number((userDoc.data() as any)?.presupuestos?.mes || 0);
 
         const q = query(
-          collection(db, `users/${user.uid}/transacciones`),
+          collection(db, `users/${userId}/transacciones`),
           where('fecha', '>=', Timestamp.fromDate(start)),
           where('tipo', '==', 'egreso'),
         );
@@ -37,8 +50,15 @@ export default function RiesgoPresupuestoCard() {
         const snap = await getDocs(q);
         const spent = snap.docs.reduce((acc, d) => acc + Number((d.data() as any)?.monto || 0), 0);
 
+        const recurrentesSnap = await getDocs(collection(db, `users/${userId}/gastosRecurrentes`));
+        const recurrentesMensuales = recurrentesSnap.docs
+          .map((d) => d.data() as any)
+          .filter((item) => item?.activo !== false)
+          .reduce((acc, item) => acc + toMonthlyAmount(item), 0);
+
         setMonthlyBudget(presupuestoMes);
         setMonthlySpent(spent);
+        setMonthlyRecurringSpent(recurrentesMensuales);
       } catch (error) {
         console.log('No se pudo calcular riesgo de presupuesto:', error);
       } finally {
@@ -47,13 +67,14 @@ export default function RiesgoPresupuestoCard() {
     };
 
     run();
-  }, [user?.uid]);
+  }, [user]);
 
   const projection = useMemo(() => {
     const now = new Date();
     const daysPassed = Math.max(1, now.getDate());
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const projected = (monthlySpent / daysPassed) * daysInMonth;
+    const projectedByTransactions = (monthlySpent / daysPassed) * daysInMonth;
+    const projected = projectedByTransactions + monthlyRecurringSpent;
 
     let status = 'Sin presupuesto mensual';
     let color = '#94a3b8';
@@ -72,8 +93,8 @@ export default function RiesgoPresupuestoCard() {
       }
     }
 
-    return { projected, status, color };
-  }, [monthlyBudget, monthlySpent]);
+    return { projected, projectedByTransactions, status, color };
+  }, [monthlyBudget, monthlySpent, monthlyRecurringSpent]);
 
   return (
     <ThemedView
@@ -102,6 +123,9 @@ export default function RiesgoPresupuestoCard() {
         <>
           <ThemedText style={{ fontSize: 12, opacity: 0.82, marginBottom: 8 }}>
             Proyección al cierre del mes: ${projection.projected.toFixed(0)} / ${monthlyBudget.toFixed(0)}
+          </ThemedText>
+          <ThemedText style={{ fontSize: 11, opacity: 0.72, marginBottom: 8 }}>
+            Incluye ${projection.projectedByTransactions.toFixed(0)} por transacciones y ${monthlyRecurringSpent.toFixed(0)} por gastos recurrentes.
           </ThemedText>
           <ThemedText style={{ fontSize: 12, fontWeight: '700', color: projection.color }}>{projection.status}</ThemedText>
         </>

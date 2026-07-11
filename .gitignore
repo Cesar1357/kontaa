@@ -42,3 +42,8 @@ app-example
 google-services.json
 android/app/google-services.json
 konta-81b61-firebase-adminsdk-fbsvc-cbf0771f87.json
+*-firebase-adminsdk-*.json
+
+# Android signing and local keys
+android/app/debug.keystore
+*.keystore

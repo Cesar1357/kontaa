@@ -252,14 +252,19 @@ export default function ResumenRapido() {
     return (
         <ThemedView
         style={{
-            backgroundColor: cardsColor,
-            borderRadius: 14,
-            paddingVertical: RFValue(16),
-            paddingHorizontal: RFValue(14),
-            marginVertical: RFValue(8),
-            alignItems: "center",
-            width: "95%",
-            alignSelf: "center",
+        backgroundColor: cardsColor,
+        borderRadius: 14,
+        paddingVertical: RFValue(10),
+        paddingHorizontal: RFValue(14),
+        marginVertical: RFValue(12),
+        alignItems: "center",
+        width: "95%",
+        alignSelf: "center",
+        shadowColor: '#000',
+        shadowOpacity: 0.08,
+        shadowOffset: { width: 0, height: 12 },
+        shadowRadius: 22,
+        elevation: 5,
         }}
         >
         <Animated.View style={[{ width: "100%" }, animatedStyle]}>
@@ -307,34 +312,36 @@ export default function ResumenRapido() {
                 withDots={false}
                 withInnerLines={false}
                 withOuterLines={false}
-                style={{ borderRadius: 10 }}
+                style={{ borderRadius: 16, backgroundColor: 'transparent' }}
                 bezier
                 fromZero
                 />
             </View>
             )}
 
-            {/* Rango selector */}
-            <View style={{ flexDirection: "row", justifyContent: "center", marginTop: RFValue(8) }}>
-            {[
-                { key: "D", label: "Día" },
-                { key: "S", label: "Semana" },
-                { key: "M", label: "Mes" },
-            ].map((opt) => (
+            <View style={{ marginTop: RFValue(14), flexDirection: 'row', justifyContent: 'space-between', width: '100%' }}>
+              {[
+                { key: 'D', label: 'Día' },
+                { key: 'S', label: 'Semana' },
+                { key: 'M', label: 'Mes' },
+              ].map((opt) => (
                 <TouchableOpacity
-                key={opt.key}
-                onPress={() => setRange(opt.key as "D" | "S" | "M")}
-                style={{
-                    paddingVertical: 6,
-                    paddingHorizontal: 12,
-                    borderRadius: 8,
-                    backgroundColor: range === opt.key ? "rgba(255, 229, 174, 0.57)" : "transparent",
-                    marginHorizontal: 6,
-                }}
+                  key={opt.key}
+                  onPress={() => setRange(opt.key as 'D' | 'S' | 'M')}
+                  style={{
+                    flex: 1,
+                    marginHorizontal: 4,
+                    paddingVertical: 8,
+                    borderRadius: 12,
+                    backgroundColor: range === opt.key ? '#5c6bf2' : 'rgba(255,255,255,0.04)',
+                    alignItems: 'center',
+                  }}
                 >
-                <ThemedText style={{ fontSize: RFValue(12) }}>{opt.label}</ThemedText>
+                  <ThemedText style={{ fontSize: RFValue(12), color: range === opt.key ? '#fff' : '#ccc' }}>
+                    {opt.label}
+                  </ThemedText>
                 </TouchableOpacity>
-            ))}
+              ))}
             </View>
         </Animated.View>
         </ThemedView>

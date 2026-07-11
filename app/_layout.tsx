@@ -1,6 +1,7 @@
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { Colors } from '@/constants/Colors';
+import { ThemeProvider, useAppTheme } from '@/hooks/ThemeContext';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as Updates from 'expo-updates';
@@ -10,11 +11,13 @@ import { PaperProvider } from 'react-native-paper';
 import 'react-native-reanimated';
 import { useNotifications } from '../hooks/useNotifications';
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function AppShell() {
+  const { resolvedTheme, isDark } = useAppTheme();
+  const navigationTheme = resolvedTheme === 'dark' ? DarkTheme : DefaultTheme;
+  const stackBackground = Colors[resolvedTheme].background;
 
   useEffect(() => {
-    onFetchUpdateAsync(); 
+    onFetchUpdateAsync();
   }, []);
 
   async function onFetchUpdateAsync() {
@@ -29,17 +32,18 @@ export default function RootLayout() {
       // You can also add an alert() to see the error message in case of an error when fetching updates.
     }
   }
+
   useNotifications();
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <BottomSheetModalProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <PaperProvider>
+        <NavigationThemeProvider value={navigationTheme}>
+          <PaperProvider>
             <Stack
               screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: 'black' },
+                contentStyle: { backgroundColor: stackBackground },
               }}>
               
               <Stack.Screen name="(sesion)/create" options={{
@@ -62,10 +66,18 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="+not-found" />
             </Stack>
-            <StatusBar style="auto" />
+            <StatusBar style={isDark ? 'light' : 'dark'} />
           </PaperProvider>
-        </ThemeProvider>
+        </NavigationThemeProvider>
       </BottomSheetModalProvider>
     </GestureHandlerRootView>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <AppShell />
+    </ThemeProvider>
   );
 }

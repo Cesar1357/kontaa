@@ -249,29 +249,34 @@ export default function BalanceHeader() {
       style={{
         backgroundColor: cardsColor,
         borderRadius: 14,
-        paddingVertical: RFValue(20),
+        paddingVertical: RFValue(5),
         paddingHorizontal: RFValue(16),
         marginVertical: RFValue(10),
         alignItems: 'center',
         width: '95%',
         alignSelf: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.08,
+        shadowOffset: { width: 0, height: 12 },
+        shadowRadius: 22,
+        elevation: 5,
       }}
     >
       {/* --- Fila superior --- */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%' }}>
-        <View>
-          <ThemedText style={{ fontSize: RFValue(13), color: '#aaa', marginBottom: 4 }}>
+        <View style={{width:'85%'}}>
+          <ThemedText style={{ fontSize: RFValue(12), color: '#aaa', marginBottom: 4 }}>
             Saldo total
           </ThemedText>
           {loading ? (
             <ActivityIndicator color={textColor} />
           ) : (
-            <ThemedText
+            <ThemedText adjustsFontSizeToFit numberOfLines={1}
               style={{
-                fontSize: RFValue(28),
+                fontSize: RFValue(25),
                 fontWeight: '700',
                 color: colorSaldo,
-                padding:5
+                padding:5,
               }}
             >
               ${total.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
@@ -293,7 +298,7 @@ export default function BalanceHeader() {
           style={{
             color: cambio < 0 ? '#ff4d4d' : '#00c851',
             marginTop: 4,
-            fontSize: RFValue(14),
+            fontSize: RFValue(12),
           }}
         >
           {cambio < 0 ? '▼' : '▲'} {Math.abs(cambio).toFixed(2)}% |{' '}
@@ -343,7 +348,7 @@ export default function BalanceHeader() {
                 marginHorizontal: 3,
               }}
             >
-              <ThemedText style={{ fontSize: RFValue(11) }}>{r}</ThemedText>
+              <ThemedText style={{ fontSize: RFValue(9) }}>{r}</ThemedText>
             </TouchableOpacity>
           ))}
         </View>

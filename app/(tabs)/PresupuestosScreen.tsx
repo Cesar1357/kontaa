@@ -1,7 +1,9 @@
 import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from "@/hooks/useAuth";
 import { useThemeColor } from '@/hooks/useThemeColor';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams } from 'expo-router';
 import {
   Timestamp,
   collection,
@@ -17,9 +19,13 @@ import React, { useEffect, useState } from "react";
 import {
   Alert,
   Modal,
+  NativeModules,
+  Platform,
   Text,
+  ToastAndroid,
   TouchableOpacity,
-  View
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { ScrollView, TextInput } from "react-native-gesture-handler";
 import Animated, { Layout } from "react-native-reanimated";
@@ -28,6 +34,7 @@ import { db } from "../../config/firebase";
 
 export default function PresupuestosScreen() {
   const { user } = useAuth();
+  const params = useLocalSearchParams<{ section?: string }>();
   const [presupuestos, setPresupuestos] = useState<any[]>([{ categoria: "Otros" }]);
   const [presupuestoGeneral, setPresupuestoGeneral] = useState<any>({
     dia: 0,
@@ -38,7 +45,7 @@ export default function PresupuestosScreen() {
   const [mostrarNuevo, setMostrarNuevo] = useState(false);
   const [nuevaCategoria, setNuevaCategoria] = useState("");
   const [nuevoLimite, setNuevoLimite] = useState("");
-  const [seccionActiva, setSeccionActiva] = useState<"general" | "personalizados" | "recurrentes">("personalizados");
+  const [seccionActiva, setSeccionActiva] = useState<"general" | "personalizados" | "preestablecidos" | "recurrentes">("personalizados");
   const [transacciones, setTransacciones] = useState<any[]>([]);
 
   const [modalEditar, setModalEditar] = useState(false);
@@ -49,6 +56,27 @@ export default function PresupuestosScreen() {
   
 
   const [tipoRecurrenteActivo, setTipoRecurrenteActivo] = useState<"gastos" | "ingresos">("gastos");
+
+  const [preestablecidosMain, setPreestablecidosMain] = useState<any[]>([]);
+  const [preestablecidosSubs, setPreestablecidosSubs] = useState<any[]>([]);
+  const [mostrarNuevoPreestablecido, setMostrarNuevoPreestablecido] = useState(false);
+  const [nuevoMainNombre, setNuevoMainNombre] = useState("");
+  const [nuevoMainIcono, setNuevoMainIcono] = useState("");
+  const [nuevoMainImagen, setNuevoMainImagen] = useState("");
+  const [mainExpandidoId, setMainExpandidoId] = useState<string | null>(null);
+  const [mainConNuevoSubId, setMainConNuevoSubId] = useState<string | null>(null);
+  const [nuevoSubNombre, setNuevoSubNombre] = useState("");
+  const [nuevoSubTipo, setNuevoSubTipo] = useState<"ingreso" | "egreso">("ingreso");
+  const [nuevoSubMonto, setNuevoSubMonto] = useState("");
+  const [nuevoSubIcono, setNuevoSubIcono] = useState("");
+  const [nuevoSubRapido, setNuevoSubRapido] = useState(true);
+  const [nuevoSubPresupuestoCategoria, setNuevoSubPresupuestoCategoria] = useState("");
+  const [showAddQuickWidgetPrompt, setShowAddQuickWidgetPrompt] = useState(false);
+  const [quickWidgetPromptAlreadyAnswered, setQuickWidgetPromptAlreadyAnswered] = useState(false);
+  const [subscriptionActive, setSubscriptionActive] = useState(false);
+  const initialSectionHandledRef = React.useRef(false);
+
+  const FREE_LIMIT = 2;
 
   const [gastosRecurrentes, setGastosRecurrentes] = useState<any[]>([]);
   const [ingresosRecurrentes, setIngresosRecurrentes] = useState<any[]>([]);
@@ -71,6 +99,7 @@ export default function PresupuestosScreen() {
   const graficaFondoColor = useThemeColor({ light: '', dark: '' }, 'graficaHistorial');
   const cardsMain = useThemeColor({ light: '', dark: '' }, 'cardsMain');
   const progressBg = useThemeColor({ light: '', dark: '' }, 'progressBg');
+  const backModalColor = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
 
   // 📡 Presupuestos personalizados
   useEffect(() => {
@@ -93,10 +122,11 @@ export default function PresupuestosScreen() {
     try{
       const ref = doc(db, `users/${user.uid}`);
       const unsub = onSnapshot(ref, (snap) => {
-        if (snap.exists() && snap.data().presupuestos) {
-          setPresupuestoGeneral(snap.data().presupuestos);
-          
+        const data = snap.data();
+        if (snap.exists() && data?.presupuestos) {
+          setPresupuestoGeneral(data.presupuestos);
         }
+        setSubscriptionActive(Boolean(data?.supportSubscription?.active));
       });
       return () => unsub();
     } catch(e){
@@ -152,7 +182,65 @@ export default function PresupuestosScreen() {
   };
 }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const refMain = collection(db, `users/${user.uid}/preestablecidosMain`);
+    const refSubs = collection(db, `users/${user.uid}/preestablecidosSubs`);
+
+    const unsubMain = onSnapshot(refMain, (snap) => {
+      const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPreestablecidosMain(data);
+    });
+
+    const unsubSubs = onSnapshot(refSubs, (snap) => {
+      const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPreestablecidosSubs(data);
+    });
+
+    return () => {
+      unsubMain();
+      unsubSubs();
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setQuickWidgetPromptAlreadyAnswered(false);
+      setShowAddQuickWidgetPrompt(false);
+      return;
+    }
+
+    const loadQuickWidgetPromptChoice = async () => {
+      try {
+        const key = `konta.widget.quickActionsPrompt.choice.${user.uid}`;
+        const savedChoice = await AsyncStorage.getItem(key);
+        setQuickWidgetPromptAlreadyAnswered(savedChoice !== null);
+      } catch (error) {
+        console.log('No se pudo cargar la preferencia del widget de accesos rapidos:', error);
+      }
+    };
+
+    loadQuickWidgetPromptChoice();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (initialSectionHandledRef.current) return;
+    if (params.section !== 'preestablecidos') return;
+
+    initialSectionHandledRef.current = true;
+    setSeccionActiva('preestablecidos');
+  }, [params.section]);
+
 // 🧮 Gasto de cada presupuesto personalizado (incluyendo los recurrentes activos)
+  const transaccionRecurrenteDelMes = (recurrenteId: string) => {
+    return transacciones.some((t) => {
+      if (t.recurrenteId !== recurrenteId) return false;
+      const fecha = t.fecha?.toDate?.() || new Date(t.fecha);
+      return fecha >= startOfMonth && fecha <= endOfMonth;
+    });
+  };
+
   const presupuestosConGasto = presupuestos.map((p) => {
     console.log("Calculando gasto para presupuesto:", p);
     if(p.categoria === "Otros"){
@@ -187,26 +275,26 @@ export default function PresupuestosScreen() {
     0
   );
 
-  // 🌀 Gastos recurrentes sin categoría o cuya categoría ya no existe
   const recurrentesRelacionados = gastosRecurrentes.filter((g) => {
     const categoriaInexistente =
       g.categoria && !categoriasExistentes.includes(g.categoria);
     return (
       g.activo &&
-      (!g.categoria || categoriaInexistente || g.categoria === "General")
+      (!g.categoria || categoriaInexistente || g.categoria === "General") &&
+      !transaccionRecurrenteDelMes(g.id)
     );
   });
 
-  const gastoRecurrentes = recurrentesRelacionados.reduce(
+  const gastoPendiente = recurrentesRelacionados.reduce(
     (acc, g) => acc + (g.monto || 0),
     0
   );
 
   // 💰 Total gastado en “Otros”
-  const gastado = gastoTransacciones + gastoRecurrentes;
+  const gastado = gastoTransacciones;
 
-  return { ...p, gastado, limite: limiteRestante };
-    }else{
+  return { ...p, gastado, pendiente: gastoPendiente, limite: limiteRestante };
+    } else {
       // Transacciones normales asociadas a la categoría del presupuesto
       const relacionadas = transacciones.filter(
         (t) => t.tipo === "egreso" && t.presupuestoCategoria === p.categoria
@@ -215,21 +303,18 @@ export default function PresupuestosScreen() {
       // Gasto total de esas transacciones
       const gastoTransacciones = relacionadas.reduce((acc, t) => acc + (t.monto || 0), 0);
 
-      // 🌀 Gastos recurrentes activos que pertenecen a la misma categoría
       const recurrentesRelacionados = gastosRecurrentes.filter(
-        (g) => g.activo && g.categoria === p.categoria
+        (g) => g.activo && g.categoria === p.categoria && !transaccionRecurrenteDelMes(g.id)
       );
 
-      // Suma de los montos de los recurrentes
-      const gastoRecurrentes = recurrentesRelacionados.reduce(
+      const gastoPendiente = recurrentesRelacionados.reduce(
         (acc, g) => acc + (g.monto || 0),
         0
       );
 
-      // Gasto total del presupuesto = transacciones + recurrentes
-      const gastado = gastoTransacciones + gastoRecurrentes;
+      const gastado = gastoTransacciones;
 
-      return { ...p, gastado };
+      return { ...p, gastado, pendiente: gastoPendiente };
   }
   });
   
@@ -245,6 +330,13 @@ export default function PresupuestosScreen() {
   // ➕ Agregar presupuesto personalizado
   const agregarPresupuesto = async () => {
     if (!nuevaCategoria || !nuevoLimite) return;
+
+    const personalizadosCount = presupuestos.filter((p) => p.categoria !== "Otros").length;
+    if (!subscriptionActive && personalizadosCount >= FREE_LIMIT) {
+      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 presupuestos personalizados sin suscripcion.");
+      return;
+    }
+
     const limite = parseFloat(nuevoLimite);
     if (isNaN(limite) || limite <= 0) {
       Alert.alert("Error", "Ingresa un límite válido.");
@@ -267,6 +359,12 @@ export default function PresupuestosScreen() {
   };
 
    const agregarRecurrente = async () => {
+    const recurrentesCount = gastosRecurrentes.length + ingresosRecurrentes.length;
+    if (!subscriptionActive && recurrentesCount >= FREE_LIMIT) {
+      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 recurrentes sin suscripcion.");
+      return;
+    }
+
     if(tipoRecurrenteActivo === "gastos"){
       if (!nuevoNombreRecurrente || !nuevoMontoRecurrente) return;
       const monto = parseFloat(nuevoMontoRecurrente);
@@ -303,6 +401,12 @@ export default function PresupuestosScreen() {
   };
 
   const agregarRecurrenteIngreso = async () => {
+  const recurrentesCount = gastosRecurrentes.length + ingresosRecurrentes.length;
+  if (!subscriptionActive && recurrentesCount >= FREE_LIMIT) {
+    Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 recurrentes sin suscripcion.");
+    return;
+  }
+
     console.log("agregando ingreso recurrente");
   if (!nuevoNombreRecurrente || !nuevoMontoRecurrente) return;
     const monto = parseFloat(nuevoMontoRecurrente);
@@ -465,6 +569,172 @@ export default function PresupuestosScreen() {
     ]);
   };
 
+  const agregarPreestablecidoMain = async () => {
+    if (!user?.uid) return;
+    if (!subscriptionActive && preestablecidosMain.length >= FREE_LIMIT) {
+      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 principales de preestablecidos sin suscripcion.");
+      return;
+    }
+
+    if (!nuevoMainNombre.trim() || !nuevoMainIcono.trim()) {
+      Alert.alert("Error", "Ingresa un nombre e icono para el principal.");
+      return;
+    }
+
+    const ref = doc(collection(db, `users/${user.uid}/preestablecidosMain`));
+    await setDoc(ref, {
+      nombre: nuevoMainNombre.trim(),
+      icono: nuevoMainIcono.trim() || "💼",
+      createdAt: new Date()
+    });
+
+    setNuevoMainNombre("");
+    setNuevoMainIcono("");
+    setNuevoMainImagen("");
+    setMostrarNuevoPreestablecido(false);
+  };
+
+  const agregarPreestablecidoSub = async (mainId: string) => {
+    if (!user?.uid) return;
+    if (!subscriptionActive && preestablecidosSubs.length >= FREE_LIMIT) {
+      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 acciones preestablecidas sin suscripcion.");
+      return;
+    }
+
+    if (!mainId || !nuevoSubNombre.trim() || !nuevoSubMonto || !nuevoSubIcono.trim()) {
+      Alert.alert("Error", "Completa principal, nombre, monto e icono.");
+      return;
+    }
+
+    const monto = parseFloat(nuevoSubMonto);
+    if (isNaN(monto) || monto <= 0) {
+      Alert.alert("Error", "Monto inválido.");
+      return;
+    }
+
+    const main = preestablecidosMain.find((m) => m.id === mainId);
+    const ref = doc(collection(db, `users/${user.uid}/preestablecidosSubs`));
+    const quickActionsCount = preestablecidosSubs.filter((s) => s.accesoRapido).length;
+    const shouldPromptWidget = nuevoSubRapido && quickActionsCount === 0 && !quickWidgetPromptAlreadyAnswered;
+
+    await setDoc(ref, {
+      mainId,
+      mainNombre: main?.nombre || "Sin principal",
+      nombre: nuevoSubNombre.trim(),
+      tipo: nuevoSubTipo,
+      montoDefault: monto,
+      icono: nuevoSubIcono.trim() || "⚡",
+      presupuestoCategoria: nuevoSubTipo === "egreso" ? (nuevoSubPresupuestoCategoria || null) : null,
+      accesoRapido: nuevoSubRapido,
+      widgetStarred: false,
+      createdAt: new Date(),
+    });
+
+    setNuevoSubNombre("");
+    setNuevoSubMonto("");
+    setNuevoSubIcono("");
+    setNuevoSubPresupuestoCategoria("");
+    setNuevoSubRapido(true);
+    setMainConNuevoSubId(null);
+
+    if (shouldPromptWidget) {
+      setShowAddQuickWidgetPrompt(true);
+    }
+  };
+
+  const setQuickWidgetPromptChoice = async (choice: 'added' | 'dismissed') => {
+    if (!user?.uid) return;
+
+    try {
+      const key = `konta.widget.quickActionsPrompt.choice.${user.uid}`;
+      await AsyncStorage.setItem(key, choice);
+      setQuickWidgetPromptAlreadyAnswered(true);
+    } catch (error) {
+      console.log('No se pudo guardar la preferencia del widget de accesos rapidos:', error);
+    }
+  };
+
+  const handleDismissQuickWidgetPrompt = async () => {
+    await setQuickWidgetPromptChoice('dismissed');
+    setShowAddQuickWidgetPrompt(false);
+  };
+
+  const handleAddQuickWidgetFromPresupuestos = async () => {
+    try {
+      const widgetModule = NativeModules.KontaWidgetModule;
+      if (Platform.OS === 'android' && widgetModule?.requestPinQuickActionsWidget) {
+        const requested = await widgetModule.requestPinQuickActionsWidget();
+        if (!requested) {
+          ToastAndroid.show('No se pudo abrir el selector de widgets en este dispositivo', ToastAndroid.SHORT);
+          return;
+        }
+
+        await setQuickWidgetPromptChoice('added');
+        setShowAddQuickWidgetPrompt(false);
+        ToastAndroid.show('Listo. Elige donde quieres colocar el widget de accesos rapidos', ToastAndroid.SHORT);
+        return;
+      }
+
+      ToastAndroid.show('Esta opcion solo esta disponible en Android', ToastAndroid.SHORT);
+    } catch (error) {
+      console.log('No se pudo solicitar el widget de accesos rapidos:', error);
+      ToastAndroid.show('No se pudo abrir el selector de widgets', ToastAndroid.SHORT);
+    }
+  };
+
+  const toggleSubRapido = async (id: string, estado: boolean) => {
+    if (!user?.uid) return;
+    await updateDoc(doc(db, `users/${user.uid}/preestablecidosSubs`, id), {
+      accesoRapido: estado,
+      updatedAt: new Date(),
+    });
+  };
+
+  const toggleSubWidgetStar = async (id: string, estado: boolean) => {
+    if (!user?.uid) return;
+
+    const estrellasActuales = preestablecidosSubs.filter((s) => s.widgetStarred).length;
+    if (estado && estrellasActuales >= 3) {
+      Alert.alert("Límite alcanzado", "Solo puedes marcar 3 acciones para el widget.");
+      return;
+    }
+
+    await updateDoc(doc(db, `users/${user.uid}/preestablecidosSubs`, id), {
+      widgetStarred: estado,
+      updatedAt: new Date(),
+    });
+  };
+
+  const eliminarPreestablecidoMain = async (id: string) => {
+    if (!user?.uid) return;
+    Alert.alert("Eliminar", "Se eliminará el principal y sus sub preestablecidos.", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: async () => {
+          const subs = preestablecidosSubs.filter((s) => s.mainId === id);
+          await Promise.all(subs.map((s) => deleteDoc(doc(db, `users/${user.uid}/preestablecidosSubs`, s.id))));
+          await deleteDoc(doc(db, `users/${user.uid}/preestablecidosMain`, id));
+        },
+      },
+    ]);
+  };
+
+  const eliminarPreestablecidoSub = async (id: string) => {
+    if (!user?.uid) return;
+    Alert.alert("Eliminar", "¿Deseas eliminar este sub preestablecido?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: async () => {
+          await deleteDoc(doc(db, `users/${user.uid}/preestablecidosSubs`, id));
+        },
+      },
+    ]);
+  };
+
   return (
     <ScrollView
       style={{
@@ -510,30 +780,330 @@ export default function PresupuestosScreen() {
       {/* BOTONES DE SECCIÓN */}
       <View
         style={{
-          flexDirection: "row",
+          flexDirection: "column",
           backgroundColor: cardsMain,
           borderRadius: 12,
           overflow: "hidden",
           marginBottom: 20,
         }}
       >
-        {["general", "personalizados","recurrentes"].map((tipo) => (
+        <View
+          style={{
+            flexDirection: "row",
+          }}
+        >
+          {["general", "personalizados"].map((tipo) => (
+            <TouchableOpacity
+              key={tipo}
+              onPress={() => setSeccionActiva(tipo as any)}
+              style={{
+                flex: 1,
+                backgroundColor: seccionActiva === tipo ? "#6366f1" : "transparent",
+                paddingVertical: 10,
+                alignItems: "center",
+              }}
+            >
+              <ThemedText style={{ fontWeight: "600" }}>
+                {tipo === "general"
+                  ? "Generales"
+                  : tipo === "personalizados"
+                  ? "Personalizados"
+                  : tipo === "preestablecidos"
+                  ? "Preestablecidos"
+                  : "Recurrentes"}
+              </ThemedText>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View
+          style={{
+            flexDirection: "row",
+          }}
+        >
+          {["preestablecidos", "recurrentes"].map((tipo) => (
+            <TouchableOpacity
+              key={tipo}
+              onPress={() => setSeccionActiva(tipo as any)}
+              style={{
+                flex: 1,
+                backgroundColor: seccionActiva === tipo ? "#6366f1" : "transparent",
+                paddingVertical: 10,
+                alignItems: "center",
+              }}
+            >
+              <ThemedText style={{ fontWeight: "600" }}>
+                {tipo === "general"
+                  ? "Generales"
+                  : tipo === "personalizados"
+                  ? "Personalizados"
+                  : tipo === "preestablecidos"
+                  ? "Preestablecidos"
+                  : "Recurrentes"}
+              </ThemedText>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {seccionActiva === "preestablecidos" && (
+        <>
+          {showAddQuickWidgetPrompt && (
+            <View
+              style={{
+                backgroundColor: graficaFondoColor,
+                borderRadius: 14,
+                padding: 14,
+                borderWidth: 1,
+                borderColor: '#6366f155',
+                marginBottom: 12,
+              }}
+            >
+              <ThemedText style={{ fontSize: 15, fontWeight: '700', marginBottom: 4 }}>
+                Agrega tu widget de accesos rapidos
+              </ThemedText>
+              <Text style={{ color: '#a1a1aa', marginBottom: 10, fontSize: 12 }}>
+                Ya creaste tu primera accion rapida. Agregala en tu pantalla principal para usarla en un toque.
+              </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                <TouchableOpacity
+                  onPress={handleDismissQuickWidgetPrompt}
+                  style={{
+                    borderRadius: 8,
+                    paddingVertical: 9,
+                    paddingHorizontal: 12,
+                    borderWidth: 1,
+                    borderColor: '#6366f155',
+                    marginRight: 8,
+                  }}
+                >
+                  <ThemedText style={{ fontSize: 12, fontWeight: '700' }}>Cerrar</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleAddQuickWidgetFromPresupuestos}
+                  style={{
+                    backgroundColor: '#6366f1',
+                    borderRadius: 8,
+                    paddingVertical: 9,
+                    paddingHorizontal: 12,
+                  }}
+                >
+                  <ThemedText style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Agregar widget</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           <TouchableOpacity
-            key={tipo}
-            onPress={() => setSeccionActiva(tipo as any)}
+            onPress={() => setMostrarNuevoPreestablecido(!mostrarNuevoPreestablecido)}
             style={{
-              flex: 1,
-              backgroundColor: seccionActiva === tipo ? "#6366f1" : "transparent",
-              paddingVertical: 10,
+              backgroundColor: "#6366f1",
+              borderRadius: 20,
+              paddingVertical: 12,
+              marginBottom: 16,
               alignItems: "center",
             }}
           >
-            <ThemedText style={{ fontWeight: "600" }}>
-              {tipo === "general" ? "Generales" : tipo === "personalizados" ? "Personalizados" : "Recurrentes"}
+            <ThemedText style={{ color: "#fff", fontWeight: "600" }}>
+              {mostrarNuevoPreestablecido ? "Cancelar" : "Nuevo principal"}
             </ThemedText>
           </TouchableOpacity>
-        ))}
-      </View>
+
+          {mostrarNuevoPreestablecido && (
+            <Animated.View layout={Layout.springify()} style={{ backgroundColor: graficaFondoColor, borderRadius: 16, padding: 16, marginBottom: 16 }}>
+              <TextInput
+                placeholder="Nombre (ej. Trabajo)"
+                placeholderTextColor="#888"
+                value={nuevoMainNombre}
+                onChangeText={setNuevoMainNombre}
+                style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 12, paddingVertical: 4 }}
+              />
+              <TextInput
+                placeholder="Icono o emoji (ej. 💼)"
+                placeholderTextColor="#888"
+                value={nuevoMainIcono}
+                onChangeText={setNuevoMainIcono}
+                style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 12, paddingVertical: 4 }}
+              />
+              <TouchableOpacity onPress={agregarPreestablecidoMain} style={{ backgroundColor: "#6366f1", paddingVertical: 10, borderRadius: 12, alignItems: "center" }}>
+                <ThemedText style={{ color: "#fff", fontWeight: "600" }}>Guardar principal</ThemedText>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+
+          {preestablecidosMain.length === 0 ? (
+            <Text style={{ color: "#999", textAlign: "center", marginTop: 8 }}>
+              Aún no hay principales. Crea uno para agregar acciones.
+            </Text>
+          ) : (
+            preestablecidosMain.map((main) => {
+              const subsMain = preestablecidosSubs.filter((s) => s.mainId === main.id);
+              const expandido = mainExpandidoId === main.id;
+              const mostrandoNuevoSub = mainConNuevoSubId === main.id;
+
+              return (
+                <View key={main.id} style={{ backgroundColor: graficaFondoColor, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <TouchableOpacity onPress={() => setMainExpandidoId(expandido ? null : main.id)} style={{ flex: 1 }}>
+                      <ThemedText style={{ fontWeight: "700", fontSize: 16 }}>
+                        {(main.icono || "💼") + " " + main.nombre}
+                      </ThemedText>
+                      <Text style={{ color: "#aaa", fontSize: 12, marginTop: 2 }}>
+                        {subsMain.length} acciones
+                      </Text>
+                    </TouchableOpacity>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                      <TouchableOpacity onPress={() => setMainConNuevoSubId(mostrandoNuevoSub ? null : main.id)}>
+                        <Text style={{ color: "#5c6bf2", fontWeight: "600" }}>
+                          {mostrandoNuevoSub ? "Cerrar" : "Nueva acción"}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => eliminarPreestablecidoMain(main.id)}>
+                        <Text style={{ color: "#f87171", fontWeight: "600" }}>Eliminar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {mostrandoNuevoSub && (
+                    <Animated.View layout={Layout.springify()} style={{ backgroundColor: cardsMain, borderRadius: 12, padding: 12, marginBottom: 10 }}>
+                      <TextInput
+                        placeholder="Nombre de la acción (ej. Cheque)"
+                        placeholderTextColor="#888"
+                        value={nuevoSubNombre}
+                        onChangeText={setNuevoSubNombre}
+                        style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
+                      />
+                      <View style={{ flexDirection: "row", marginBottom: 10 }}>
+                        <TouchableOpacity
+                          onPress={() => setNuevoSubTipo("ingreso")}
+                          style={[styles.tipoBtn, { backgroundColor: nuevoSubTipo === "ingreso" ? "#3edc81" : "#2a2a2a" }]}
+                        >
+                          <Text style={{ color: nuevoSubTipo === "ingreso" ? "black" : "white", fontWeight: "600" }}>Ingreso</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setNuevoSubTipo("egreso")}
+                          style={[styles.tipoBtn, { backgroundColor: nuevoSubTipo === "egreso" ? "#ff6363" : "#2a2a2a" }]}
+                        >
+                          <Text style={{ color: nuevoSubTipo === "egreso" ? "black" : "white", fontWeight: "600" }}>Egreso</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <TextInput
+                        placeholder="Monto por defecto"
+                        placeholderTextColor="#888"
+                        keyboardType="numeric"
+                        value={nuevoSubMonto}
+                        onChangeText={setNuevoSubMonto}
+                        style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
+                      />
+
+                      {nuevoSubTipo === "egreso" && presupuestos.length > 0 && (
+                        <View style={{ marginBottom: 10 }}>
+                          <Text style={{ color: textColor, marginBottom: 6, fontWeight: "500" }}>
+                            Asociar a presupuesto:
+                          </Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            <TouchableOpacity
+                              onPress={() => setNuevoSubPresupuestoCategoria("")}
+                              style={[
+                                styles.presupuestoBtn,
+                                { backgroundColor: !nuevoSubPresupuestoCategoria ? "#6366f1" : "#2a2a2a" },
+                              ]}
+                            >
+                              <Text style={{ color: "white" }}>Ninguno</Text>
+                            </TouchableOpacity>
+
+                            {presupuestos
+                              .filter((p) => p.categoria !== "Otros")
+                              .map((p) => (
+                                <TouchableOpacity
+                                  key={p.id || p.categoria}
+                                  onPress={() =>
+                                    setNuevoSubPresupuestoCategoria(
+                                      nuevoSubPresupuestoCategoria === p.categoria ? "" : p.categoria
+                                    )
+                                  }
+                                  style={[
+                                    styles.presupuestoBtn,
+                                    {
+                                      backgroundColor:
+                                        nuevoSubPresupuestoCategoria === p.categoria ? "#6366f1" : "#2a2a2a",
+                                    },
+                                  ]}
+                                >
+                                  <Text style={{ color: "white" }}>{p.categoria}</Text>
+                                </TouchableOpacity>
+                              ))}
+                          </ScrollView>
+                        </View>
+                      )}
+
+                      <TextInput
+                        placeholder="Icono o emoji (ej. ⚡)"
+                        placeholderTextColor="#888"
+                        value={nuevoSubIcono}
+                        onChangeText={setNuevoSubIcono}
+                        style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
+                      />
+                      <TouchableOpacity
+                        onPress={() => setNuevoSubRapido(!nuevoSubRapido)}
+                        style={{ marginBottom: 12, backgroundColor: nuevoSubRapido ? "#3edc81" : "#444", borderRadius: 8, paddingVertical: 8, alignItems: "center" }}
+                      >
+                        <Text style={{ color: nuevoSubRapido ? "black" : "white", fontWeight: "600" }}>
+                          {nuevoSubRapido ? "Acceso rápido: Activo" : "Acceso rápido: Inactivo"}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => agregarPreestablecidoSub(main.id)} style={{ backgroundColor: "#6366f1", paddingVertical: 10, borderRadius: 10, alignItems: "center" }}>
+                        <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar acción</Text>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  )}
+
+                  {expandido && (
+                    <View>
+                      {subsMain.length === 0 ? (
+                        <Text style={{ color: "#999", fontSize: 12 }}>Este principal no tiene acciones todavía.</Text>
+                      ) : (
+                        subsMain.map((item) => (
+                          <View key={item.id} style={{ backgroundColor: cardsMain, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                              <View style={{ flex: 1 }}>
+                                <ThemedText style={{ fontWeight: "700" }}>{(item.icono || "⚡") + " " + item.nombre}</ThemedText>
+                                <Text style={{ color: "#aaa", fontSize: 12 }}>
+                                  {item.tipo} • ${Number(item.montoDefault || 0).toFixed(2)}
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                <TouchableOpacity
+                                  onPress={() => toggleSubWidgetStar(item.id, !item.widgetStarred)}
+                                  style={{ backgroundColor: item.widgetStarred ? "#f59e0b" : "#555", borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8, justifyContent: "center", alignItems: "center", }}
+                                >
+                                  <Text style={{ color: item.widgetStarred ? "black" : "white", fontWeight: "600", marginBottom: 3 }}>★</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  onPress={() => toggleSubRapido(item.id, !item.accesoRapido)}
+                                  style={{ backgroundColor: item.accesoRapido ? "#3edc81" : "#555", borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8 }}
+                                >
+                                  <Text style={{ color: item.accesoRapido ? "black" : "white", fontWeight: "600" }}>
+                                    {item.accesoRapido ? "Rápido" : "Off"}
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => eliminarPreestablecidoSub(item.id)}>
+                                  <Text style={{ color: "#f87171", fontWeight: "600" }}>Eliminar</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </View>
+                        ))
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          )}
+
+          <View style={{ height: 120 }} />
+        </>
+      )}
 
       {/* PRESUPUESTOS GENERALES */}
       {seccionActiva === "general" && (
@@ -642,7 +1212,11 @@ export default function PresupuestosScreen() {
           )}
 
           {presupuestosConGasto.map((p) => {
-            const porcentaje = Math.min((p.gastado / p.limite) * 100, 100);
+            const porcentaje = p.limite ? Math.min((p.gastado / p.limite) * 100, 100) : 0;
+            const porcentajeConPrevisto = p.limite
+              ? Math.min(((p.gastado + (p.pendiente || 0)) / p.limite) * 100, 100)
+              : 0;
+            const pendientePorcentaje = Math.max(porcentajeConPrevisto - porcentaje, 0);
             const color =
               porcentaje < 70
                 ? "#4ade80"
@@ -681,6 +1255,7 @@ export default function PresupuestosScreen() {
                     borderRadius: 10,
                     overflow: "hidden",
                     marginBottom: 10,
+                    flexDirection: "row",
                   }}
                 >
                   <View
@@ -688,10 +1263,23 @@ export default function PresupuestosScreen() {
                       height: "100%",
                       width: `${porcentaje}%`,
                       backgroundColor: color,
-                      borderRadius: 10,
                     }}
                   />
+                  {pendientePorcentaje > 0 && (
+                    <View
+                      style={{
+                        height: "100%",
+                        width: `${pendientePorcentaje}%`,
+                        backgroundColor: "rgba(99,102,241,0.45)",
+                      }}
+                    />
+                  )}
                 </View>
+                {p.pendiente > 0 && (
+                  <ThemedText style={{ color: '#9ca3af', fontSize: 12, marginBottom: 8 }}>
+                    +${p.pendiente.toFixed(2)} previsto para este mes
+                  </ThemedText>
+                )}
                 <View
                   style={{
                     flexDirection: "row",
@@ -905,7 +1493,7 @@ export default function PresupuestosScreen() {
             <View
               key={item.id}
               style={{
-                backgroundColor: "#2a2a2a",
+                backgroundColor: graficaFondoColor,
                 borderRadius: 12,
                 padding: 12,
                 marginBottom: 10,
@@ -919,9 +1507,9 @@ export default function PresupuestosScreen() {
                 }}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: "white", fontWeight: "600" }}>
+                  <ThemedText style={{ fontWeight: "600" }}>
                     {item.nombre}
-                  </Text>
+                  </ThemedText>
                   <Text style={{ color: "#aaa", fontSize: 13 }}>
                     {tipoRecurrenteActivo === "gastos"? item.categoria : null} • ${item.monto.toFixed(2)}
                   </Text>
@@ -983,72 +1571,74 @@ export default function PresupuestosScreen() {
 
       {/* MODAL EDITAR */}
       <Modal visible={modalEditar} transparent animationType="fade">
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.6)",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
+        <TouchableWithoutFeedback onPress={() => setModalEditar(false)}>
           <View
             style={{
-              width: "85%",
-              backgroundColor: "#1c1c1c",
-              borderRadius: 16,
-              padding: 20,
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.6)",
+              justifyContent: "center",
+              alignItems: "center",
             }}
           >
-            <Text style={{ color: "#fff", fontSize: 18, fontWeight: "600", marginBottom: 12 }}>
-              Editar {presupuestoEditar?.tipo === "recurrente"? presupuestoEditar?.nombre: presupuestoEditar?.categoria}
-            </Text>
-            <TextInput
-              placeholder="Nuevo valor"
-              placeholderTextColor="#888"
-              keyboardType="numeric"
-              value={nuevoValorEditar}
-              onChangeText={setNuevoValorEditar}
+            <View
               style={{
-                color: "#fff",
-                borderBottomColor: "#333",
-                borderBottomWidth: 1,
-                marginBottom: 16,
-                paddingVertical: 4,
+                width: "85%",
+                backgroundColor: backModalColor,
+                borderRadius: 16,
+                padding: 20,
               }}
-            />
-            {presupuestoEditar?.tipo === "recurrente" && (
+            >
+              <ThemedText style={{ fontSize: 18, fontWeight: "600", marginBottom: 12 }}>
+                Editar {presupuestoEditar?.tipo === "recurrente"? presupuestoEditar?.nombre: presupuestoEditar?.categoria}
+              </ThemedText>
               <TextInput
-                placeholder="Nueva dia (1-28)"
+                placeholder="Nuevo valor"
                 placeholderTextColor="#888"
                 keyboardType="numeric"
-                value={nuevoValorEditarFecha}
-                onChangeText={setNuevoValorEditarFecha}
+                value={nuevoValorEditar}
+                onChangeText={setNuevoValorEditar}
                 style={{
-                  color: "#fff",
+                  color: "#888",
                   borderBottomColor: "#333",
                   borderBottomWidth: 1,
                   marginBottom: 16,
                   paddingVertical: 4,
                 }}
               />
-            )}
-            <TouchableOpacity
-              onPress={guardarEdicion}
-              style={{
-                backgroundColor: "#5c6bf2",
-                borderRadius: 10,
-                paddingVertical: 10,
-                alignItems: "center",
-                marginBottom: 10,
-              }}
-            >
-              <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setModalEditar(false)}>
-              <Text style={{ color: "#aaa", textAlign: "center" }}>Cancelar</Text>
-            </TouchableOpacity>
+              {presupuestoEditar?.tipo === "recurrente" && (
+                <TextInput
+                  placeholder="Nueva dia (1-28)"
+                  placeholderTextColor="#888"
+                  keyboardType="numeric"
+                  value={nuevoValorEditarFecha}
+                  onChangeText={setNuevoValorEditarFecha}
+                  style={{
+                    color: "#888",
+                    borderBottomColor: "#333",
+                    borderBottomWidth: 1,
+                    marginBottom: 16,
+                    paddingVertical: 4,
+                  }}
+                />
+              )}
+              <TouchableOpacity
+                onPress={guardarEdicion}
+                style={{
+                  backgroundColor: "#5c6bf2",
+                  borderRadius: 10,
+                  paddingVertical: 10,
+                  alignItems: "center",
+                  marginBottom: 10,
+                }}
+              >
+                <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setModalEditar(false)}>
+                <Text style={{ color: "#aaa", textAlign: "center" }}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </ScrollView>
   );

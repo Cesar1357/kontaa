@@ -1,18 +1,21 @@
 import { ThemedText } from '@/components/ThemedText';
 import { db } from "@/config/firebase";
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { Ionicons } from '@expo/vector-icons';
 import { addDoc, collection, onSnapshot } from "firebase/firestore";
 import { MotiView } from "moti";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   ToastAndroid,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { RFValue } from "react-native-responsive-fontsize";
@@ -21,18 +24,31 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   userId: string;
+  onSaved?: () => void;
+  initialData?: {
+    descripcion?: string;
+    monto?: number;
+    tipo?: "ingreso" | "egreso";
+    preestablecidoMainId?: string;
+    preestablecidoMainNombre?: string;
+    preestablecidoSubId?: string;
+    preestablecidoSubNombre?: string;
+  } | null;
 }
 
-export default function NuevaTransaccionModal({ visible, onClose, userId }: Props) {
+export default function NuevaTransaccionModal({ visible, onClose, userId, onSaved, initialData }: Props) {
   const [descripcion, setDescripcion] = useState("");
   const [monto, setMonto] = useState("");
   const [tipo, setTipo] = useState<"ingreso" | "egreso" | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [presupuestos, setPresupuestos] = useState<any[]>([]);
   const [presupuestoSeleccionado, setPresupuestoSeleccionado] = useState<string | null>(null);
+  const [preestablecidosMain, setPreestablecidosMain] = useState<any[]>([]);
+  const [preestablecidoMainSeleccionado, setPreestablecidoMainSeleccionado] = useState<string | null>(null);
 
   const backModalColor = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
 
+  const descripcionRef = useRef<TextInput>(null);
   // 🔹 Escuchar los presupuestos personalizados del usuario
   useEffect(() => {
     if (!userId) return;
@@ -44,9 +60,42 @@ export default function NuevaTransaccionModal({ visible, onClose, userId }: Prop
     return () => unsub();
   }, [userId]);
 
+  useEffect(() => {
+  if (visible) {
+    setTimeout(() => {
+      descripcionRef.current?.focus();
+    }, 300); // pequeño delay para asegurar render
+  }
+}, [visible]);
+
+  useEffect(() => {
+    if (!visible || !initialData) return;
+
+    setDescripcion(initialData.descripcion || "");
+    setMonto(initialData.monto ? String(initialData.monto) : "");
+    setTipo(initialData.tipo || null);
+    setPreestablecidoMainSeleccionado(initialData.preestablecidoMainId || null);
+  }, [visible, initialData]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const ref = collection(db, "users", userId, "preestablecidosMain");
+    const unsub = onSnapshot(ref, (snap) => {
+      const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPreestablecidosMain(arr);
+      console.log(arr);
+    });
+    
+
+    return () => unsub();
+  }, [userId]);
+
   const handleGuardar = async () => {
     if (!descripcion || !monto || !tipo) return;
     setGuardando(true);
+
+    const mainSeleccionado = preestablecidosMain.find((m) => m.id === preestablecidoMainSeleccionado) || null;
 
     try {
       await addDoc(collection(db, "users", userId, "transacciones"), {
@@ -55,6 +104,10 @@ export default function NuevaTransaccionModal({ visible, onClose, userId }: Prop
         tipo,
         fecha: new Date(),
         presupuestoCategoria: presupuestos.find(p => p.id === presupuestoSeleccionado)?.categoria || null,
+        preestablecidoMainId: mainSeleccionado?.id || initialData?.preestablecidoMainId || null,
+        preestablecidoMainNombre: mainSeleccionado?.nombre || initialData?.preestablecidoMainNombre || null,
+        preestablecidoSubId: initialData?.preestablecidoSubId || null,
+        preestablecidoSubNombre: initialData?.preestablecidoSubNombre || null,
       });
 
       // Limpiar campos
@@ -62,6 +115,8 @@ export default function NuevaTransaccionModal({ visible, onClose, userId }: Prop
       setMonto("");
       setTipo(null);
       setPresupuestoSeleccionado(null);
+      setPreestablecidoMainSeleccionado(null);
+      onSaved?.();
       onClose();
       ToastAndroid.show("Movimiento registrado", ToastAndroid.SHORT);
     } catch (e) {
@@ -72,46 +127,58 @@ export default function NuevaTransaccionModal({ visible, onClose, userId }: Prop
   };
 
   return (
-    <Modal visible={visible} animationType="fade" transparent>
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: "rgba(0,0,0,0.6)",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <MotiView
-          from={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "timing", duration: 300 }}
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View
           style={{
-            width: "85%",
-            backgroundColor: backModalColor,
-            borderRadius: 16,
-            padding: RFValue(20),
-            maxHeight: "90%",
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            justifyContent: 'center',
+            alignItems: 'center',
           }}
         >
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <ThemedText
-                style={{
-                  fontSize: RFValue(18),
-                  fontWeight: "700",
-                  textAlign: "center",
-                  marginBottom: 15,
-                }}
-              >
-                Nueva transacción
-              </ThemedText>
+          <TouchableWithoutFeedback>
+            <MotiView
+              from={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'timing', duration: 240 }}
+              style={{
+                width: '86%',
+                backgroundColor: backModalColor,
+                borderRadius: 20,
+                padding: RFValue(18),
+                maxHeight: '90%',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 10 },
+                shadowOpacity: 0.18,
+                shadowRadius: 30,
+                elevation: 10,
+              }}
+            >
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <ThemedText
+                      style={{
+                        fontSize: RFValue(18),
+                        fontWeight: '700',
+                      }}
+                    >
+                      Nueva transacción
+                    </ThemedText>
+                    <TouchableOpacity onPress={onClose} style={{ padding: 6 }}>
+                      <Ionicons name="close" size={24} color="#999" />
+                    </TouchableOpacity>
+                  </View>
 
               <TextInput
+                ref={descripcionRef}
                 placeholder="Descripción"
                 placeholderTextColor="#999"
                 style={styles.input}
                 value={descripcion}
                 onChangeText={setDescripcion}
+                
               />
 
               <TextInput
@@ -190,6 +257,42 @@ export default function NuevaTransaccionModal({ visible, onClose, userId }: Prop
                 </View>
               )}
 
+              {preestablecidosMain.length > 0 && tipo === "ingreso" && (
+                <View style={{ marginBottom: 10 }}>
+                  <Text style={{ color: "#ccc", marginBottom: 6, fontWeight: "500" }}>
+                    Asociar ingreso a principal:
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <TouchableOpacity
+                      onPress={() => setPreestablecidoMainSeleccionado(null)}
+                      style={[
+                        styles.presupuestoBtn,
+                        { backgroundColor: !preestablecidoMainSeleccionado ? "#6366f1" : "#2a2a2a" },
+                      ]}
+                    >
+                      <Text style={{ color: "white" }}>Ninguno</Text>
+                    </TouchableOpacity>
+
+                    {preestablecidosMain.map((main) => (
+                      <TouchableOpacity
+                        key={main.id}
+                        onPress={() => setPreestablecidoMainSeleccionado(preestablecidoMainSeleccionado === main.id ? null : main.id)}
+                        style={[
+                          styles.presupuestoBtn,
+                          {
+                            backgroundColor: preestablecidoMainSeleccionado === main.id ? "#6366f1" : "#2a2a2a",
+                          },
+                        ]}
+                      >
+                        <Text numberOfLines={1} style={{ color: "white", maxWidth: 120 }}>
+                          {(main.icono || "📁") + " " + (main.nombre || "Sin nombre")}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
               {/* Botón guardar */}
               <TouchableOpacity
                 onPress={handleGuardar}
@@ -227,12 +330,14 @@ export default function NuevaTransaccionModal({ visible, onClose, userId }: Prop
             </ScrollView>
           </KeyboardAvoidingView>
         </MotiView>
-      </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }
 
-const styles = {
+const styles = StyleSheet.create({
   input: {
     backgroundColor: "#2a2a2a",
     color: "white",
@@ -253,5 +358,7 @@ const styles = {
     paddingVertical: 8,
     borderRadius: 10,
     marginRight: 8,
+    justifyContent: "center",
+    alignItems: "center",
   },
-};
+});

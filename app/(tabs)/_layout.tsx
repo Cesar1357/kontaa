@@ -1,4 +1,5 @@
 import { HapticTab } from '@/components/HapticTab';
+import { useThemeColor } from '@/hooks/useThemeColor';
 import { Tabs } from 'expo-router';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
@@ -7,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const tabBarBackground = useThemeColor({ light: '#FFFFFF', dark: '#111827' }, 'cardsMain');
 
   return (
         <Tabs
@@ -18,7 +20,9 @@ export default function TabLayout() {
             tabBarStyle: Platform.select({
               default: {
                 borderTopWidth: 1,
-                elevation: 1,  
+                borderColor: tabBarBackground,
+                elevation: 1,
+                backgroundColor: tabBarBackground,
               },
             }),
           }}>

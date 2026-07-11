@@ -3,27 +3,52 @@
  * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
  */
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const tintColorLight = '#2563EB';
+const tintColorDark = '#8B5CF6';
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#e7f3fcff',
-    background2: '#e7f3fcff',
-    graficaHistorial: '#a1ecffff',
+    text: '#0F172A',
+    background: '#F4F7FB',
+    background2: '#EEF4FA',
+    graficaHistorial: '#D9EAFE',
     tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#e7f3fcff',
+    icon: '#64748B',
+    tabIconDefault: '#94A3B8',
     tabIconSelected: tintColorLight,
-    cardMain: '#5897f7ff',
-    transaccionModal:'#c8f0ffff',
-    cardsMain: '#a1ecffff',
-    resumenRapido:'rgba(114, 83, 15, 0.57)',
-    progressBg: "#a8a8a8ff"
+    cardMain: '#FFFFFF',
+    transaccionModal: '#FFFFFF',
+    cardsMain: '#FFFFFF',
+    resumenRapido: 'rgba(37, 99, 235, 0.12)',
+    progressBg: '#E2E8F0',
+    primary: '#2F7D4C',
+    primaryDark: '#215E38',
+    surface: '#FFFFFF',
+    surfaceVariant: '#F8FAFC',
+    border: '#E2E8F0',
   },
   dark: {
-    text: '#ECEDEE',
+    text: '#F8FAFC',
+    background: '#0b1120',
+    background2: '#111827',
+    graficaHistorial: '#1E293B',
+    tint: tintColorDark,
+    icon: '#94A3B8',
+    tabIconDefault: '#475569',
+    tabIconSelected: tintColorDark,
+    cardMain: '#111827',
+    transaccionModal: '#111827',
+    cardsMain: '#1E293B',
+    resumenRapido: 'rgba(139, 92, 246, 0.2)',
+    progressBg: '#334155',
+    primary: '#34D399',
+    primaryDark: '#10B981',
+    surface: '#111827',
+    surfaceVariant: '#1E293B',
+    border: '#334155',
+  },
+  grey: {
+    text: '#ffffff',
     background: '#151718',
     background2: '#0a0a0a',
     graficaHistorial: '#141414',
@@ -35,6 +60,11 @@ export const Colors = {
     transaccionModal: '#1e1e1e',
     cardsMain: '#1C1C1E',
     resumenRapido:'rgba(255, 229, 174, 0.57)',
-    progressBg: "#2a2a2a"
+    progressBg: '#2a2a2a',
+    primary: '#34D399',
+    primaryDark: '#10B981',
+    surface: '#0a0a0a',
+    surfaceVariant: '#1c1c1f',
+    border: '#303030',
   },
 };

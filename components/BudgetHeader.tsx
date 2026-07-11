@@ -193,13 +193,17 @@ export default function PresupuestoHeader() {
     <ThemedView
       style={{
         backgroundColor: cardsColor,
-        borderRadius: 14,
-        paddingVertical: RFValue(20),
-        paddingHorizontal: RFValue(16),
+        borderRadius: 18,
+        paddingVertical: RFValue(10),
+        paddingHorizontal: RFValue(18),
         marginVertical: RFValue(10),
-        alignItems: 'center',
         width: '95%',
         alignSelf: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.08,
+        shadowOffset: { width: 0, height: 12 },
+        shadowRadius: 22,
+        elevation: 5,
       }}
     >
       {/* --- Fila superior --- */}
@@ -213,7 +217,7 @@ export default function PresupuestoHeader() {
           ) : (
             <ThemedText
               style={{
-                fontSize: RFValue(28),
+                fontSize: RFValue(25),
                 fontWeight: '700',
                 color: restante < 0 ? '#ff4d4d' : textColor,
                 padding:5
@@ -234,16 +238,32 @@ export default function PresupuestoHeader() {
 
       {/* --- Subinfo --- */}
       {!loading && (
-        <ThemedText
-          style={{
-            color: porcentaje > 100 ? '#ff4d4d' : '#ffbd44',
-            marginTop: 4,
-            fontSize: RFValue(14),
-          }}
-        >
-          {porcentaje.toFixed(1)}% del presupuesto usado | Gasto: $
-          {gastoTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
-        </ThemedText>
+        <View style={{ width: '100%', marginBottom: 0 }}>
+          <View
+            style={{
+              height: 10,
+              width: '100%',
+              borderRadius: 12,
+              backgroundColor: '#2b2b2d',
+              overflow: 'hidden',
+            }}
+          >
+            <View
+              style={{
+                height: '100%',
+                width: `${Math.min(100, Math.max(0, porcentaje))}%`,
+                backgroundColor: porcentaje > 100 ? '#ff4d4d' : '#ffbd44',
+              }}
+            />
+          </View>
+          <ThemedText style={{ color: '#999', marginTop: 8, fontSize: RFValue(13) }}>
+            {porcentaje > 0
+              ? `${porcentaje.toFixed(1)}% usado · Gastos: $${gastoTotal.toLocaleString('es-MX', {
+                  minimumFractionDigits: 2,
+                })}`
+              : 'Aún no hay gastos en este periodo'}
+          </ThemedText>
+        </View>
       )}
 
       {/* --- Contenedor animado --- */}

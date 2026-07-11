@@ -18,42 +18,75 @@ const db = admin.firestore();
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
 /**
- * Envía una notificación push a través de Expo
+ * Obtiene los tokens de push de dispositivos con notificaciones activadas para un usuario
  */
-async function sendPushNotification(pushToken, title, body, data = {}) {
+async function getEnabledPushTokens(userId) {
   try {
-    const message = {
-      to: pushToken,
-      sound: 'default',
-      title,
-      body,
-      data,
-      badge: 1,
-    };
-
-    const response = await fetch(EXPO_PUSH_URL, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
+    const devicesSnapshot = await db.collection(`users/${userId}/devices`)
+      .where('notificationsEnabled', '==', true)
+      .get();
+    
+    const tokens = [];
+    devicesSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.pushToken) {
+        tokens.push(data.pushToken);
+      }
     });
-
-    const jsonData = await response.json();
-
-    if (jsonData.errors) {
-      console.error('Error enviando notificación:', jsonData.errors);
-      return false;
-    }
-
-    console.log('Notificación enviada exitosamente:', jsonData);
-    return true;
+    
+    return tokens;
   } catch (error) {
-    console.error('Error en sendPushNotification:', error);
-    return false;
+    console.error('Error obteniendo tokens de push:', error);
+    return [];
   }
+}
+/**
+ * Envía una notificación push a través de Expo
+ * Ahora acepta un array de tokens para enviar a múltiples dispositivos
+ */
+async function sendPushNotification(pushTokens, title, body, data = {}) {
+  if (!Array.isArray(pushTokens)) {
+    pushTokens = [pushTokens]; // Para compatibilidad con llamadas individuales
+  }
+  
+  const results = [];
+  for (const pushToken of pushTokens) {
+    try {
+      const message = {
+        to: pushToken,
+        sound: 'default',
+        title,
+        body,
+        data,
+        badge: 1,
+      };
+
+      const response = await fetch(EXPO_PUSH_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+      });
+
+      const jsonData = await response.json();
+
+      if (jsonData.errors) {
+        console.error('Error enviando notificación:', jsonData.errors);
+        results.push(false);
+      } else {
+        console.log('Notificación enviada exitosamente:', jsonData);
+        results.push(true);
+      }
+    } catch (error) {
+      console.error('Error en sendPushNotification:', error);
+      results.push(false);
+    }
+  }
+  
+  return results.some(result => result); // Retorna true si al menos una se envió
 }
 
 /**
@@ -75,18 +108,16 @@ exports.sendTestPush = functions.https.onRequest(async (req, res) => {
   }
 
   try {
-    const userDoc = await db.collection('users').doc(uid.toString()).get();
-    const userData = userDoc.data();
-    const pushToken = userData?.pushToken;
+    const pushTokens = await getEnabledPushTokens(uid);
 
-    if (!pushToken) {
-      return res.status(404).json({ error: 'User has no pushToken' });
+    if (pushTokens.length === 0) {
+      return res.status(404).json({ error: 'User has no enabled devices with push tokens' });
     }
 
     const title = 'Hola';
     const body = 'Sigues ahí?';
 
-    const sent = await sendPushNotification(pushToken, title, body, {
+    const sent = await sendPushNotification(pushTokens, title, body, {
       type: 'test',
       source: 'remote-test',
     });
@@ -120,11 +151,11 @@ exports.notifyAhorrosSinMovimientos = functions.scheduler
 
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
-        const userData = userDoc.data();
-        const pushToken = userData.pushToken;
-
-        if (!pushToken) {
-          console.log(`Usuario ${userId} no tiene push token`);
+        
+        // Obtener tokens de dispositivos con notificaciones activadas
+        const pushTokens = await getEnabledPushTokens(userId);
+        if (pushTokens.length === 0) {
+          console.log(`Usuario ${userId} no tiene dispositivos con notificaciones activadas`);
           continue;
         }
 
@@ -151,7 +182,7 @@ exports.notifyAhorrosSinMovimientos = functions.scheduler
             const title = '💰 Mantén activo tu ahorro';
             const body = `No has agregado dinero a "${ahorroData.nombre}" en 7 días. ¡Continúa ahorrando!`;
 
-            await sendPushNotification(pushToken, title, body, {
+            await sendPushNotification(pushTokens, title, body, {
               type: 'ahorros',
               ahorroId,
               ahorroNombre: ahorroData.nombre,
@@ -173,6 +204,63 @@ exports.notifyAhorrosSinMovimientos = functions.scheduler
   });
 
 /**
+ * Verifica diariamente si no hay transacciones en los últimos 7 días
+ * Se ejecuta a las 10:30 AM cada día
+ */
+exports.notifyTransaccionesSinMovimiento = functions.scheduler
+  .onSchedule(
+    {
+      schedule: '30 10 * * *',
+      timeZone: 'America/Mexico_City',
+    },
+    async (context) => {
+      console.log('Verificando transacciones sin movimiento');
+
+      try {
+        const usersSnapshot = await db.collection('users').get();
+
+        for (const userDoc of usersSnapshot.docs) {
+          const userId = userDoc.id;
+          const pushTokens = await getEnabledPushTokens(userId);
+          if (pushTokens.length === 0) continue;
+
+          const diasAtras = new Date();
+          diasAtras.setDate(diasAtras.getDate() - 5);
+
+          const transaccionesRecientes = await db
+            .collection(`users/${userId}/transacciones`)
+            .where('fecha', '>=', admin.firestore.Timestamp.fromDate(diasAtras))
+            .get();
+
+          if (!transaccionesRecientes.empty) continue;
+
+          const hasOlderTransaccion = !(await db
+            .collection(`users/${userId}/transacciones`)
+            .limit(1)
+            .get()).empty;
+
+          if (!hasOlderTransaccion) continue;
+
+          const title = '📌 Registro de transacciones inactivo';
+          const body = 'No has registrado ningún movimiento en los últimos 7 días. Agrega un gasto o ingreso para mantener tu control financiero actualizado.';
+
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'transacciones',
+            periodo: 'sin-movimiento',
+          });
+
+          console.log(`Notificación de transacciones sin movimiento enviada a ${userId}`);
+        }
+
+        console.log('Verificación de transacciones sin movimiento completada');
+        return null;
+      } catch (error) {
+        console.error('Error en notifyTransaccionesSinMovimiento:', error);
+        return null;
+      }
+    });
+
+/**
  * Verifica diariamente los gastos recurrentes que deben cobrar hoy
  * Se ejecuta a las 8:00 AM cada día
  */
@@ -191,10 +279,10 @@ exports.notifyGastosRecurrentes = functions.scheduler
 
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
-        const userData = userDoc.data();
-        const pushToken = userData.pushToken;
-
-        if (!pushToken) continue;
+        
+        // Obtener tokens de dispositivos con notificaciones activadas
+        const pushTokens = await getEnabledPushTokens(userId);
+        if (pushTokens.length === 0) continue;
 
         // Obtener gastos recurrentes activos
         const gastosSnapshot = await db
@@ -219,7 +307,7 @@ exports.notifyGastosRecurrentes = functions.scheduler
               ? `Tu gasto "${gastosDetalle[0]}" de $${totalGastos.toLocaleString('es-MX')} se ejecuta hoy.`
               : `${gastosDetalle.length} pagos recurrentes por $${totalGastos.toLocaleString('es-MX')} se ejecutan hoy.`;
 
-          await sendPushNotification(pushToken, title, body, {
+          await sendPushNotification(pushTokens, title, body, {
             type: 'recurrente',
             totalGastos,
             gastos: gastosDetalle.join(', '),
@@ -256,10 +344,10 @@ exports.notifyIngresosRecurrentes = functions.scheduler
 
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
-        const userData = userDoc.data();
-        const pushToken = userData.pushToken;
-
-        if (!pushToken) continue;
+        
+        // Obtener tokens de dispositivos con notificaciones activadas
+        const pushTokens = await getEnabledPushTokens(userId);
+        if (pushTokens.length === 0) continue;
 
         // Obtener ingresos recurrentes activos
         const ingresosSnapshot = await db
@@ -284,7 +372,7 @@ exports.notifyIngresosRecurrentes = functions.scheduler
               ? `Tu ingreso "${ingresosDetalle[0]}" de $${totalIngresos.toLocaleString('es-MX')} se recibe hoy.`
               : `${ingresosDetalle.length} ingresos recurrentes por $${totalIngresos.toLocaleString('es-MX')} se reciben hoy.`;
 
-          await sendPushNotification(pushToken, title, body, {
+          await sendPushNotification(pushTokens, title, body, {
             type: 'recurrente',
             totalIngresos,
             ingresos: ingresosDetalle.join(', '),
@@ -346,6 +434,12 @@ exports.processRecurringTransactions = functions.scheduler
               console.log(`Fecha transacción calculada: ${fechaTransaccion.toISOString()} para diaPago: ${g.diaPago}, mes: ${m.mes + 1}/${m.año}`);
               const inicioMes = new Date(m.año, m.mes, 1);
               const finMes = new Date(m.año, m.mes + 1, 0);
+
+              // Si la fecha de transacción aún no llegó, no generar la transacción
+              if (fechaTransaccion > ahora) {
+                console.log(`Se omite ${tipo} recurrente ${g.nombre} para ${m.mes + 1}/${m.año} porque el día de pago aún no llega.`);
+                continue;
+              }
 
               // Buscar si ya existe una transacción de ese recurrente en el mes
               const transaccionesRef = db.collection(`users/${userId}/transacciones`);
@@ -413,80 +507,476 @@ function obtenerMesesEntre(inicio, fin) {
 }
 
 exports.notifyMetaAhorroProxima = functions.firestore
-  .onDocumentUpdated('users/{userId}/ahorros/{ahorroId}', async (change, context) => {
-    const { userId, ahorroId } = context.params;
-    const newData = change.after.data();
-    const oldData = change.before.data();
-
-    // Si no hay meta definida, salir
-    if (!newData.meta || newData.meta === 0) return null;
-
-    const porcentajeAnterior = oldData.cantidadActual / newData.meta;
-    const porcentajeNuevo = newData.cantidadActual / newData.meta;
-
-    // Si cruzamos el 90%, enviar notificación
-    if (porcentajeAnterior < 0.9 && porcentajeNuevo >= 0.9) {
-      try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        const pushToken = userDoc.data()?.pushToken;
-
-        if (!pushToken) return null;
-
-        const title = '🎉 ¡Meta casi cumplida!';
-        const body = `Tu ahorro "${newData.nombre}" alcanzó el 90% de tu objetivo. ¡Casi lo logras!`;
-
-        await sendPushNotification(pushToken, title, body, {
-          type: 'ahorros',
-          ahorroId,
-          ahorroNombre: newData.nombre,
-        });
-
-        console.log(`Notificación de meta próxima enviada a ${userId}`);
-      } catch (error) {
-        console.error('Error en notifyMetaAhorroProxima:', error);
+  .onDocumentUpdated('users/{userId}/ahorros/{ahorroId}', async event => {
+    try {
+      if (!event || !event.params) {
+        console.error('Event or params undefined in notifyMetaAhorroProxima', event);
+        return null;
       }
-    }
+      const { userId, ahorroId } = event.params;
+      const newData = event.data.after.data();
+      const oldData = event.data.before.data();
 
-    return null;
+      // Si no hay meta definida, salir
+      if (!newData.meta || newData.meta === 0) return null;
+
+      const porcentajeAnterior = oldData.cantidadActual / newData.meta;
+      const porcentajeNuevo = newData.cantidadActual / newData.meta;
+
+      // Si cruzamos el 80%, enviar notificación
+      if (porcentajeAnterior < 0.8 && porcentajeNuevo >= 0.8) {
+        try {
+          const pushTokens = await getEnabledPushTokens(userId);
+          if (pushTokens.length === 0) return null;
+
+          const title = '🎉 ¡Meta casi cumplida!';
+          const body = `Tu ahorro "${newData.nombre}" alcanzó el 80% de tu objetivo. ¡Casi lo logras!`;
+
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'ahorros',
+            ahorroId,
+            ahorroNombre: newData.nombre,
+          });
+
+          console.log(`Notificación de meta próxima enviada a ${userId}`);
+        } catch (error) {
+          console.error('Error en notifyMetaAhorroProxima:', error);
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error general en notifyMetaAhorroProxima:', error);
+      return null;
+    }
   });
 
 /**
  * Notificación cuando se cumple completamente una meta de ahorro
  */
 exports.notifyMetaAhorroCompleta = functions.firestore
-  .onDocumentUpdated('users/{userId}/ahorros/{ahorroId}', async (change, context) => {
-    const { userId, ahorroId } = context.params;
-    const newData = change.after.data();
-    const oldData = change.before.data();
+  .onDocumentUpdated('users/{userId}/ahorros/{ahorroId}', async event => {
+    try {
+      if (!event || !event.params) {
+        console.error('Event or params undefined in notifyMetaAhorroCompleta', event);
+        return null;
+      }
+      const { userId, ahorroId } = event.params;
+      const newData = event.data.after.data();
+      const oldData = event.data.before.data();
 
-    // Si no hay meta definida, salir
-    if (!newData.meta || newData.meta === 0) return null;
+      // Si no hay meta definida, salir
+      if (!newData.meta || newData.meta === 0) return null;
 
-    const seCompleto =
-      oldData.cantidadActual < newData.meta &&
-      newData.cantidadActual >= newData.meta;
+      const seCompleto =
+        oldData.cantidadActual < newData.meta &&
+        newData.cantidadActual >= newData.meta;
 
-    if (seCompleto) {
-      try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        const pushToken = userDoc.data()?.pushToken;
+      if (seCompleto) {
+        try {
+          const pushTokens = await getEnabledPushTokens(userId);
+          if (pushTokens.length === 0) return null;
 
-        if (!pushToken) return null;
+          const title = '🏆 ¡Meta completada!';
+          const body = `¡Felicidades! Completaste tu objetivo de "${newData.nombre}". Puedes crear una nueva meta.`;
 
-        const title = '🏆 ¡Meta completada!';
-        const body = `¡Felicidades! Completaste tu objetivo de "${newData.nombre}". Puedes crear una nueva meta.`;
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'ahorros',
+            ahorroId,
+            ahorroNombre: newData.nombre,
+          });
 
-        await sendPushNotification(pushToken, title, body, {
-          type: 'ahorros',
-          ahorroId,
-          ahorroNombre: newData.nombre,
+          console.log(`Notificación de meta completa enviada a ${userId}`);
+        } catch (error) {
+          console.error('Error en notifyMetaAhorroCompleta:', error);
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error general en notifyMetaAhorroCompleta:', error);
+      return null;
+    }
+  });
+
+/**
+ * Verifica presupuestos diarios y envía alertas
+ * Se ejecuta cada hora para monitoreo en tiempo real
+ */
+exports.notifyPresupuestosDiarios = functions.scheduler
+  .onSchedule(
+    {
+      schedule: '0 * * * *', // Cada hora
+      timeZone: 'America/Mexico_City',
+    },
+    async (context) => {
+    console.log('Verificando presupuestos diarios');
+
+    try {
+      const usersSnapshot = await db.collection('users').get();
+      const hoy = new Date();
+      const inicioDia = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 0, 0, 0);
+      const finDia = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59);
+
+      for (const userDoc of usersSnapshot.docs) {
+        const userId = userDoc.id;
+        const userData = userDoc.data();
+
+        // Verificar si tiene presupuesto diario
+        if (!userData.presupuestos?.dia || userData.presupuestos.dia === 0) continue;
+
+        const presupuestoDiario = userData.presupuestos.dia;
+
+        // Obtener tokens de dispositivos con notificaciones activadas
+        const pushTokens = await getEnabledPushTokens(userId);
+        if (pushTokens.length === 0) continue;
+
+        // Calcular gastos del día actual
+        const transaccionesRef = db.collection(`users/${userId}/transacciones`);
+        const gastosDia = await transaccionesRef
+          .where('tipo', '==', 'egreso')
+          .where('fecha', '>=', admin.firestore.Timestamp.fromDate(inicioDia))
+          .where('fecha', '<=', admin.firestore.Timestamp.fromDate(finDia))
+          .get();
+
+        let totalGastosDia = 0;
+        gastosDia.forEach(doc => {
+          totalGastosDia += doc.data().monto || 0;
         });
 
-        console.log(`Notificación de meta completa enviada a ${userId}`);
-      } catch (error) {
-        console.error('Error en notifyMetaAhorroCompleta:', error);
-      }
-    }
+        const porcentajeGastado = (totalGastosDia / presupuestoDiario) * 100;
 
-    return null;
+        // Alertas de proximidad (80%)
+        if (porcentajeGastado >= 80 && porcentajeGastado < 100) {
+          const restante = presupuestoDiario - totalGastosDia;
+          const title = '⚠️ Presupuesto diario casi agotado';
+          const body = `Has gastado $${totalGastosDia.toLocaleString('es-MX')} de tu presupuesto diario de $${presupuestoDiario.toLocaleString('es-MX')}. Te quedan $${restante.toLocaleString('es-MX')}.`;
+
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'presupuesto',
+            periodo: 'diario',
+            gastado: totalGastosDia,
+            presupuesto: presupuestoDiario,
+            porcentaje: Math.round(porcentajeGastado),
+          });
+
+          console.log(`Alerta de presupuesto diario próximo enviada a ${userId}`);
+        }
+
+        // Alerta de rebase (100%+)
+        if (porcentajeGastado >= 100) {
+          const excedente = totalGastosDia - presupuestoDiario;
+          const title = '🚨 Presupuesto diario excedido';
+          const body = `Has excedido tu presupuesto diario por $${excedente.toLocaleString('es-MX')}. Gastaste $${totalGastosDia.toLocaleString('es-MX')} de $${presupuestoDiario.toLocaleString('es-MX')}.`;
+
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'presupuesto',
+            periodo: 'diario',
+            gastado: totalGastosDia,
+            presupuesto: presupuestoDiario,
+            excedente: excedente,
+            porcentaje: Math.round(porcentajeGastado),
+          });
+
+          console.log(`Alerta de presupuesto diario excedido enviada a ${userId}`);
+        }
+      }
+
+      console.log('Verificación de presupuestos diarios completada');
+      return null;
+    } catch (error) {
+      console.error('Error en notifyPresupuestosDiarios:', error);
+      return null;
+    }
+  });
+
+/**
+ * Verifica presupuestos semanales y envía alertas
+ * Se ejecuta diariamente a las 10:00 PM
+ */
+exports.notifyPresupuestosSemanales = functions.scheduler
+  .onSchedule(
+    {
+      schedule: '0 22 * * *', // 10:00 PM diario
+      timeZone: 'America/Mexico_City',
+    },
+    async (context) => {
+    console.log('Verificando presupuestos semanales');
+
+    try {
+      const usersSnapshot = await db.collection('users').get();
+      const hoy = new Date();
+
+      // Calcular inicio y fin de semana (lunes a domingo)
+      const diaSemana = hoy.getDay(); // 0 = domingo, 1 = lunes
+      const diasDesdeLunes = diaSemana === 0 ? 6 : diaSemana - 1;
+      const inicioSemana = new Date(hoy);
+      inicioSemana.setDate(hoy.getDate() - diasDesdeLunes);
+      inicioSemana.setHours(0, 0, 0, 0);
+
+      const finSemana = new Date(inicioSemana);
+      finSemana.setDate(inicioSemana.getDate() + 6);
+      finSemana.setHours(23, 59, 59, 999);
+
+      for (const userDoc of usersSnapshot.docs) {
+        const userId = userDoc.id;
+        const userData = userDoc.data();
+
+        // Verificar si tiene presupuesto semanal
+        if (!userData.presupuestos?.semana || userData.presupuestos.semana === 0) continue;
+
+        const presupuestoSemanal = userData.presupuestos.semana;
+
+        // Obtener tokens de dispositivos con notificaciones activadas
+        const pushTokens = await getEnabledPushTokens(userId);
+        if (pushTokens.length === 0) continue;
+
+        // Calcular gastos de la semana actual
+        const transaccionesRef = db.collection(`users/${userId}/transacciones`);
+        const gastosSemana = await transaccionesRef
+          .where('tipo', '==', 'egreso')
+          .where('fecha', '>=', admin.firestore.Timestamp.fromDate(inicioSemana))
+          .where('fecha', '<=', admin.firestore.Timestamp.fromDate(finSemana))
+          .get();
+
+        let totalGastosSemana = 0;
+        gastosSemana.forEach(doc => {
+          totalGastosSemana += doc.data().monto || 0;
+        });
+
+        const porcentajeGastado = (totalGastosSemana / presupuestoSemanal) * 100;
+
+        // Alertas de proximidad (80%)
+        if (porcentajeGastado >= 80 && porcentajeGastado < 100) {
+          const restante = presupuestoSemanal - totalGastosSemana;
+          const title = '⚠️ Presupuesto semanal casi agotado';
+          const body = `Has gastado $${totalGastosSemana.toLocaleString('es-MX')} de tu presupuesto semanal de $${presupuestoSemanal.toLocaleString('es-MX')}. Te quedan $${restante.toLocaleString('es-MX')}.`;
+
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'presupuesto',
+            periodo: 'semanal',
+            gastado: totalGastosSemana,
+            presupuesto: presupuestoSemanal,
+            porcentaje: Math.round(porcentajeGastado),
+          });
+
+          console.log(`Alerta de presupuesto semanal próximo enviada a ${userId}`);
+        }
+
+        // Alerta de rebase (100%+)
+        if (porcentajeGastado >= 100) {
+          const excedente = totalGastosSemana - presupuestoSemanal;
+          const title = '🚨 Presupuesto semanal excedido';
+          const body = `Has excedido tu presupuesto semanal por $${excedente.toLocaleString('es-MX')}. Gastaste $${totalGastosSemana.toLocaleString('es-MX')} de $${presupuestoSemanal.toLocaleString('es-MX')}.`;
+
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'presupuesto',
+            periodo: 'semanal',
+            gastado: totalGastosSemana,
+            presupuesto: presupuestoSemanal,
+            excedente: excedente,
+            porcentaje: Math.round(porcentajeGastado),
+          });
+
+          console.log(`Alerta de presupuesto semanal excedido enviada a ${userId}`);
+        }
+      }
+
+      console.log('Verificación de presupuestos semanales completada');
+      return null;
+    } catch (error) {
+      console.error('Error en notifyPresupuestosSemanales:', error);
+      return null;
+    }
+  });
+
+/**
+ * Verifica presupuestos mensuales y envía alertas
+ * Se ejecuta diariamente a las 11:00 PM
+ */
+exports.notifyPresupuestosMensuales = functions.scheduler
+  .onSchedule(
+    {
+      schedule: '0 23 * * *', // 11:00 PM diario
+      timeZone: 'America/Mexico_City',
+    },
+    async (context) => {
+    console.log('Verificando presupuestos mensuales');
+
+    try {
+      const usersSnapshot = await db.collection('users').get();
+      const hoy = new Date();
+      const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1, 0, 0, 0);
+      const finMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59);
+
+      for (const userDoc of usersSnapshot.docs) {
+        const userId = userDoc.id;
+        const userData = userDoc.data();
+
+        // Verificar si tiene presupuesto mensual
+        if (!userData.presupuestos?.mes || userData.presupuestos.mes === 0) continue;
+
+        const presupuestoMensual = userData.presupuestos.mes;
+
+        // Obtener tokens de dispositivos con notificaciones activadas
+        const pushTokens = await getEnabledPushTokens(userId);
+        if (pushTokens.length === 0) continue;
+
+        // Calcular gastos del mes actual
+        const transaccionesRef = db.collection(`users/${userId}/transacciones`);
+        const gastosMes = await transaccionesRef
+          .where('tipo', '==', 'egreso')
+          .where('fecha', '>=', admin.firestore.Timestamp.fromDate(inicioMes))
+          .where('fecha', '<=', admin.firestore.Timestamp.fromDate(finMes))
+          .get();
+
+        let totalGastosMes = 0;
+        gastosMes.forEach(doc => {
+          totalGastosMes += doc.data().monto || 0;
+        });
+
+        const porcentajeGastado = (totalGastosMes / presupuestoMensual) * 100;
+
+        // Alertas de proximidad (80%)
+        if (porcentajeGastado >= 80 && porcentajeGastado < 100) {
+          const restante = presupuestoMensual - totalGastosMes;
+          const title = '⚠️ Presupuesto mensual casi agotado';
+          const body = `Has gastado $${totalGastosMes.toLocaleString('es-MX')} de tu presupuesto mensual de $${presupuestoMensual.toLocaleString('es-MX')}. Te quedan $${restante.toLocaleString('es-MX')}.`;
+
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'presupuesto',
+            periodo: 'mensual',
+            gastado: totalGastosMes,
+            presupuesto: presupuestoMensual,
+            porcentaje: Math.round(porcentajeGastado),
+          });
+
+          console.log(`Alerta de presupuesto mensual próximo enviada a ${userId}`);
+        }
+
+        // Alerta de rebase (100%+)
+        if (porcentajeGastado >= 100) {
+          const excedente = totalGastosMes - presupuestoMensual;
+          const title = '🚨 Presupuesto mensual excedido';
+          const body = `Has excedido tu presupuesto mensual por $${excedente.toLocaleString('es-MX')}. Gastaste $${totalGastosMes.toLocaleString('es-MX')} de $${presupuestoMensual.toLocaleString('es-MX')}.`;
+
+          await sendPushNotification(pushTokens, title, body, {
+            type: 'presupuesto',
+            periodo: 'mensual',
+            gastado: totalGastosMes,
+            presupuesto: presupuestoMensual,
+            excedente: excedente,
+            porcentaje: Math.round(porcentajeGastado),
+          });
+
+          console.log(`Alerta de presupuesto mensual excedido enviada a ${userId}`);
+        }
+      }
+
+      console.log('Verificación de presupuestos mensuales completada');
+      return null;
+    } catch (error) {
+      console.error('Error en notifyPresupuestosMensuales:', error);
+      return null;
+    }
+  });
+
+/**
+ * Verifica presupuestos personalizados por categoría y envía alertas
+ * Se ejecuta cada 6 horas para monitoreo frecuente
+ */
+exports.notifyPresupuestosPersonalizados = functions.scheduler
+  .onSchedule(
+    {
+      schedule: '0 */6 * * *', // Cada 6 horas
+      timeZone: 'America/Mexico_City',
+    },
+    async (context) => {
+    console.log('Verificando presupuestos personalizados');
+
+    try {
+      const usersSnapshot = await db.collection('users').get();
+      const hoy = new Date();
+      const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1, 0, 0, 0);
+      const finMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59);
+
+      for (const userDoc of usersSnapshot.docs) {
+        const userId = userDoc.id;
+
+        // Obtener tokens de dispositivos con notificaciones activadas
+        const pushTokens = await getEnabledPushTokens(userId);
+        if (pushTokens.length === 0) continue;
+
+        // Obtener presupuestos personalizados del usuario
+        const presupuestosRef = db.collection(`users/${userId}/presupuestosPersonalizados`);
+        const presupuestosSnapshot = await presupuestosRef.get();
+
+        for (const presupuestoDoc of presupuestosSnapshot.docs) {
+          const presupuestoData = presupuestoDoc.data();
+          const categoria = presupuestoData.categoria;
+          const limite = presupuestoData.limite;
+
+          if (!limite || limite === 0) continue;
+
+          // Calcular gastos de la categoría en el mes actual
+          const transaccionesRef = db.collection(`users/${userId}/transacciones`);
+          const gastosCategoria = await transaccionesRef
+            .where('tipo', '==', 'egreso')
+            .where('presupuestoCategoria', '==', categoria)
+            .where('fecha', '>=', admin.firestore.Timestamp.fromDate(inicioMes))
+            .where('fecha', '<=', admin.firestore.Timestamp.fromDate(finMes))
+            .get();
+
+          let totalGastosCategoria = 0;
+          gastosCategoria.forEach(doc => {
+            totalGastosCategoria += doc.data().monto || 0;
+          });
+
+          const porcentajeGastado = (totalGastosCategoria / limite) * 100;
+
+          // Alertas de proximidad (80%)
+          if (porcentajeGastado >= 80 && porcentajeGastado < 100) {
+            const restante = limite - totalGastosCategoria;
+            const title = `⚠️ Presupuesto "${categoria}" casi agotado`;
+            const body = `Has gastado $${totalGastosCategoria.toLocaleString('es-MX')} de tu presupuesto de $${limite.toLocaleString('es-MX')} en "${categoria}". Te quedan $${restante.toLocaleString('es-MX')}.`;
+
+            await sendPushNotification(pushTokens, title, body, {
+              type: 'presupuesto',
+              periodo: 'personalizado',
+              categoria: categoria,
+              gastado: totalGastosCategoria,
+              presupuesto: limite,
+              porcentaje: Math.round(porcentajeGastado),
+            });
+
+            console.log(`Alerta de presupuesto personalizado próximo enviada a ${userId} para ${categoria}`);
+          }
+
+          // Alerta de rebase (100%+)
+          if (porcentajeGastado >= 100) {
+            const excedente = totalGastosCategoria - limite;
+            const title = `🚨 Presupuesto "${categoria}" excedido`;
+            const body = `Has excedido tu presupuesto de "${categoria}" por $${excedente.toLocaleString('es-MX')}. Gastaste $${totalGastosCategoria.toLocaleString('es-MX')} de $${limite.toLocaleString('es-MX')}.`;
+
+            await sendPushNotification(pushTokens, title, body, {
+              type: 'presupuesto',
+              periodo: 'personalizado',
+              categoria: categoria,
+              gastado: totalGastosCategoria,
+              presupuesto: limite,
+              excedente: excedente,
+              porcentaje: Math.round(porcentajeGastado),
+            });
+
+            console.log(`Alerta de presupuesto personalizado excedido enviada a ${userId} para ${categoria}`);
+          }
+        }
+      }
+
+      console.log('Verificación de presupuestos personalizados completada');
+      return null;
+    } catch (error) {
+      console.error('Error en notifyPresupuestosPersonalizados:', error);
+      return null;
+    }
   });

@@ -18,7 +18,7 @@ import {
   Timestamp,
   updateDoc
 } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,7 +31,8 @@ import {
   TextInput,
   ToastAndroid,
   TouchableOpacity,
-  View
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { FlatList } from "react-native-gesture-handler";
 import Animated, { Layout } from "react-native-reanimated";
@@ -51,6 +52,9 @@ export default function AhorrosScreen() {
   const { user } = useAuth();
   const [ahorros, setAhorros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [subscriptionActive, setSubscriptionActive] = useState(false);
+
+  const FREE_LIMIT = 2;
 
   // UI modal/new
   const [showNuevo, setShowNuevo] = useState(false);
@@ -67,10 +71,12 @@ export default function AhorrosScreen() {
 
   const [selected, setSelected] = useState<any>(null); // ahorro seleccionado
   const [movimientoMonto, setMovimientoMonto] = useState("");
-  const [movimientoTipo, setMovimientoTipo] = useState<"deposito" | "retiro">("deposito");
+  const [movimientoTipo, setMovimientoTipo] = useState<"deposito" | "retiro" | "transferencia">("deposito");
 
   const [editando, setEditando] = useState(false);
   const [cantidadActual, setCantidadActual] = useState(0);
+  const nombreInputRef = useRef<TextInput>(null);
+  const movimientoInputRef = useRef<TextInput>(null);
 
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
   const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background');
@@ -83,7 +89,7 @@ export default function AhorrosScreen() {
   const styles = StyleSheet.create({
   headerCard: {
     padding: 18,
-    borderRadius: 16,
+    borderRadius: 20,
   },
   headerTitle: { color: "white", fontSize: RFValue(20), fontWeight: "700" },
   headerSubtitle: { color: "#e6e6e6", marginTop: 6 },
@@ -183,8 +189,9 @@ export default function AhorrosScreen() {
 
   // efectos: escuchar ahorros
   useEffect(() => {
-    if (!user?.uid) return;
-    const ref = collection(db, `users/${user.uid}/ahorros`);
+    const userId = (user as any)?.uid;
+    if (!userId) return;
+    const ref = collection(db, `users/${userId}/ahorros`);
     const q = query(ref, orderBy("creado", "desc"));
     const unsub = onSnapshot(
       q,
@@ -201,12 +208,36 @@ export default function AhorrosScreen() {
     return () => unsub();
   }, [user]);
 
+  useEffect(() => {
+    const userId = (user as any)?.uid;
+    if (!userId) {
+      setSubscriptionActive(false);
+      return;
+    }
+
+    const userRef = doc(db, `users/${userId}`);
+    const unsub = onSnapshot(userRef, (snap) => {
+      const data = snap.data() || {};
+      setSubscriptionActive(Boolean((data as any).supportSubscription?.active));
+    });
+
+    return () => unsub();
+  }, [user]);
+
   // util: formatea número con comas (sin decimales)
   const fmt = (n: number) =>
     n?.toLocaleString?.("es-MX", { maximumFractionDigits: 2, minimumFractionDigits: 0 }) ?? "0";
 
   // Crear nuevo ahorro
   const guardarNuevo = async () => {
+    const userId = (user as any)?.uid;
+    if (!userId) return;
+
+    if (!editando && !subscriptionActive && ahorros.length >= FREE_LIMIT) {
+      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 metas de ahorro sin suscripcion.");
+      return;
+    }
+
     if (!nombre.trim()) {
       Alert.alert("Error", "Pon un nombre para la meta.");
       return;
@@ -222,7 +253,7 @@ export default function AhorrosScreen() {
     
     try {
       if (editando) {
-        const ref = doc(db, `users/${user.uid}/ahorros`, selected.id);
+        const ref = doc(db, `users/${userId}/ahorros`, selected.id);
         await updateDoc(ref, {
           nombre: nombre.trim(),
           meta: meta === "" ? "" : metaNum,
@@ -231,7 +262,7 @@ export default function AhorrosScreen() {
         });
         ToastAndroid.show("Meta actualizada", ToastAndroid.SHORT);
       } else {
-        const ref = collection(db, `users/${user.uid}/ahorros`);
+        const ref = collection(db, `users/${userId}/ahorros`);
         await addDoc(ref, {
           nombre: nombre.trim(),
           meta: meta === "" ? "" : metaNum,
@@ -256,6 +287,16 @@ export default function AhorrosScreen() {
     }
   };
 
+  useEffect(() => {
+    if (!showNuevo) return;
+
+    const timer = setTimeout(() => {
+      nombreInputRef.current?.focus();
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [showNuevo, editando]);
+
   // Abrir detalle
   const abrirDetalle = (a: any) => {
     setSelected(a);
@@ -264,14 +305,25 @@ export default function AhorrosScreen() {
     setShowDetalle(true);
   };
 
+  useEffect(() => {
+    if (!showDetalle) return;
+
+    const timer = setTimeout(() => {
+      movimientoInputRef.current?.focus();
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [showDetalle]);
+
   const abrirTransacciones = async (a: any) => {
-    if (!user?.uid) return;
+    const userId = (user as any)?.uid;
+    if (!userId) return;
     setSelected(a);
     setShowTransacciones(true);
     setCargandoMovimientos(true);
 
     try {
-      const ref = doc(db, `users/${user.uid}/ahorros`, a.id);
+      const ref = doc(db, `users/${userId}/ahorros`, a.id);
       const q = query(collection(ref, "movimientos"), orderBy("creado", "desc"));
 
       const unsub = onSnapshot(q, (snap) => {
@@ -291,14 +343,17 @@ export default function AhorrosScreen() {
   // Depositar / retirar (transactional)
   const ejecutarMovimiento = async () => {
     if (!selected) return;
+    const userId = (user as any)?.uid;
+    if (!userId) return;
     const montoNum = parseFloat(movimientoMonto.toString().replace(/,/g, ""));
     if (isNaN(montoNum) || montoNum <= 0) {
       Alert.alert("Error", "Ingresa un monto válido.");
       return;
     }
 
-    const ahorroRef = doc(db, `users/${user.uid}/ahorros`, selected.id);
-    const movsRef = collection(db, `users/${user.uid}/ahorros`, selected.id, "movimientos");
+    const ahorroRef = doc(db, `users/${userId}/ahorros`, selected.id);
+    const movsRef = collection(db, `users/${userId}/ahorros`, selected.id, "movimientos");
+    const transaccionesRef = collection(db, `users/${userId}/transacciones`);
 
     try {
       await runTransaction(db, async (tx) => {
@@ -306,10 +361,25 @@ export default function AhorrosScreen() {
         if (!snap.exists()) throw new Error("Meta no encontrada");
 
         const current = snap.data()?.cantidadActual || 0;
-        const newAmount = movimientoTipo === "deposito" ? current + montoNum : current - montoNum;
+        const newAmount = movimientoTipo === "deposito"
+          ? current + montoNum
+          : current - montoNum;
 
-        if (movimientoTipo === "retiro" && newAmount < 0) {
+        if ((movimientoTipo === "retiro" || movimientoTipo === "transferencia") && newAmount < 0) {
           throw new Error("No hay suficiente en la meta para retirar esa cantidad.");
+        }
+
+        if (movimientoTipo === "transferencia") {
+          tx.set(doc(transaccionesRef), {
+            descripcion: `Transferencia a ahorro: ${selected.nombre}`,
+            monto: montoNum,
+            tipo: "egreso",
+            fecha: serverTimestamp(),
+            creadoAutomaticamente: false,
+            origen: "transferencia-ahorro",
+            ahorroId: selected.id,
+            ahorroNombre: selected.nombre,
+          });
         }
 
         // actualizar ahorro
@@ -323,7 +393,12 @@ export default function AhorrosScreen() {
           tipo: movimientoTipo,
           monto: montoNum,
           creado: serverTimestamp(),
-          nota: movimientoTipo === "deposito" ? "Depósito manual" : "Retiro manual",
+          nota:
+            movimientoTipo === "deposito"
+              ? "Depósito manual"
+              : movimientoTipo === "retiro"
+                ? "Retiro manual"
+                : "Transferencia desde saldo",
         };
         tx.set(doc(movsRef), movimientoDoc);
       });
@@ -338,6 +413,8 @@ export default function AhorrosScreen() {
 
   // Eliminar meta
   const confirmarEliminar = (a: any) => {
+    const userId = (user as any)?.uid;
+    if (!userId) return;
     Alert.alert("Eliminar meta", `¿Eliminar "${a.nombre}"?`, [
       { text: "Cancelar", style: "cancel" },
       {
@@ -345,7 +422,7 @@ export default function AhorrosScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            await deleteDoc(doc(db, `users/${user.uid}/ahorros`, a.id));
+            await deleteDoc(doc(db, `users/${userId}/ahorros`, a.id));
             ToastAndroid.show("Meta eliminada", ToastAndroid.SHORT);
           } catch (e) {
             console.error("Error eliminar meta:", e);
@@ -455,188 +532,215 @@ export default function AhorrosScreen() {
           elevation: 8,
         }}
       >
-        <Ionicons name="add" size={28} color="white" />
+        <Ionicons name="add" size={30} color="white" />
       </TouchableOpacity>
 
        <Modal visible={showTransacciones} transparent animationType="fade">
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <ThemedText style={styles.modalTitle}>
-                Movimientos de {selected?.nombre || ""}
-              </ThemedText>
-              <TouchableOpacity onPress={() => setShowTransacciones(false)}>
-                <Ionicons name="close" size={24} color="#fff" />
-              </TouchableOpacity>
-            </View>
-
-            {cargandoMovimientos ? (
-              <ActivityIndicator
-                size="large"
-                color="#5c6bf2"
-                style={{ marginTop: 20 }}
-              />
-            ) : transaccionesData.length === 0 ? (
-              <Text
+        <TouchableWithoutFeedback onPress={() => setShowTransacciones(false)}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <View
                 style={{
-                  color: "#aaa",
-                  textAlign: "center",
-                  marginTop: 30,
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
                 }}
               >
-                No hay movimientos registrados.
-              </Text>
-            ) : (
-              <FlatList
-                data={transaccionesData}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={{ marginTop: 10 }}
-                renderItem={({ item }) => (
-                  <View style={styles.movCard}>
-                    <Text style={{ color: item.tipo === "deposito"? "#4ade80" : "#f87171", fontWeight: "bold" }}>
-                      {item.tipo === "deposito" ? "➕" : "➖"} {fmt(item.monto)}
-                    </Text>
-                    <Text style={{ color: "#aaa", fontSize: 12 }}>
-                      {item.nota || "Sin descripción"}
-                    </Text>
-                    {item.creado?.seconds ? (
-                      <Text style={{ color: "#666", fontSize: 11, marginTop: 2 }}>
-                        {new Date(
-                          item.creado.seconds * 1000
-                        ).toLocaleDateString()}
+                <ThemedText style={styles.modalTitle}>
+                  Movimientos de {selected?.nombre || ""}
+                </ThemedText>
+                <TouchableOpacity onPress={() => setShowTransacciones(false)}>
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              {cargandoMovimientos ? (
+                <ActivityIndicator
+                  size="large"
+                  color="#5c6bf2"
+                  style={{ marginTop: 20 }}
+                />
+              ) : transaccionesData.length === 0 ? (
+                <Text
+                  style={{
+                    color: "#aaa",
+                    textAlign: "center",
+                    marginTop: 30,
+                  }}
+                >
+                  No hay movimientos registrados.
+                </Text>
+              ) : (
+                <FlatList
+                  data={transaccionesData}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={{ marginTop: 10 }}
+                  renderItem={({ item }) => (
+                    <View style={styles.movCard}>
+                      <ThemedText
+                        style={{
+                          color: item.tipo === "deposito" || item.tipo === "transferencia" ? "#4ade80" : "#f87171",
+                          fontWeight: "600",
+                        }}
+                      >
+                        {item.tipo === "deposito" || item.tipo === "transferencia" ? "+" : "-"}${item.monto.toFixed(2)}
+                      </ThemedText>
+                      <Text style={{ color: "#aaa", fontSize: 12 }}>
+                        {item.nota || "Sin descripción"}
                       </Text>
-                    ) : null}
-                  </View>
-                )}
-              />
-            )}
+                      {item.creado?.seconds ? (
+                        <Text style={{ color: "#666", fontSize: 11, marginTop: 2 }}>
+                          {new Date(
+                            item.creado.seconds * 1000
+                          ).toLocaleDateString()}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )}
+                />
+              )}
+            </View>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
       {/* Modal Nuevo (reutilizable para edición básica) */}
       <Modal visible={showNuevo} transparent animationType="fade">
-        <View style={styles.modalBack}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalCard}>
-            <ThemedText style={{ fontSize: 20, fontWeight: "700", marginBottom: 8 }}>
-              {selected ? "Editar meta" : "Nueva meta"}
-            </ThemedText>
+        <TouchableWithoutFeedback onPress={() => setShowNuevo(false)}>
+          <View style={styles.modalBack}>
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalCard}>
+              <ThemedText style={{ fontSize: 20, fontWeight: "700", marginBottom: 8 }}>
+                {selected ? "Editar meta" : "Nueva meta"}
+              </ThemedText>
 
-            <TextInput
-              placeholder="Nombre"
-              placeholderTextColor="#999"
-              value={nombre}
-              onChangeText={setNombre}
-              style={styles.input}
-            />
+              <TextInput
+                ref={nombreInputRef}
+                placeholder="Nombre"
+                placeholderTextColor="#999"
+                value={nombre}
+                onChangeText={setNombre}
+                style={styles.input}
+              />
 
-            <TextInput
-              placeholder="Meta (MXN) (opcional)"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              value={meta}
-              onChangeText={setMeta}
-              style={styles.input}
-            />
+              <TextInput
+                placeholder="Meta (MXN) (opcional)"
+                placeholderTextColor="#999"
+                keyboardType="numeric"
+                value={meta}
+                onChangeText={setMeta}
+                style={styles.input}
+              />
 
-            <TextInput
-              placeholder="Descripción (opcional)"
-              placeholderTextColor="#999"
-              value={descripcion}
-              onChangeText={setDescripcion}
-              style={styles.input}
-            />
+              <TextInput
+                placeholder="Descripción (opcional)"
+                placeholderTextColor="#999"
+                value={descripcion}
+                onChangeText={setDescripcion}
+                style={styles.input}
+              />
 
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-              <TouchableOpacity
-                onPress={() => {
-                  // reset form
-                  setNombre("");
-                  setMeta("");
-                  setDescripcion("");
-                  setFechaLimite(null);
-                  setShowNuevo(false);
-                  setEditando(false);
-                  setCantidadActual(0);
-                  setSelected(null);
-                }}
-                style={[styles.btn, { backgroundColor: "#2a2a2a", flex: 1 }]}
-              >
-                <Text style={{ color: "white", textAlign: "center" }}>Cancelar</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    // reset form
+                    setNombre("");
+                    setMeta("");
+                    setDescripcion("");
+                    setFechaLimite(null);
+                    setShowNuevo(false);
+                    setEditando(false);
+                    setCantidadActual(0);
+                    setSelected(null);
+                  }}
+                  style={[styles.btn, { backgroundColor: "#2a2a2a", flex: 1 }]}
+                >
+                  <Text style={{ color: "white", textAlign: "center" }}>Cancelar</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={guardarNuevo}
-                style={[styles.btn, { backgroundColor: "#5c6bf2", flex: 1 }]}
-              >
-                <Text style={{ color: "white", textAlign: "center" }}>Guardar</Text>
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
+                <TouchableOpacity
+                  onPress={guardarNuevo}
+                  style={[styles.btn, { backgroundColor: "#5c6bf2", flex: 1 }]}
+                >
+                  <Text style={{ color: "white", textAlign: "center" }}>Guardar</Text>
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       {/* Modal detalle: depositar / retirar */}
       <Modal visible={showDetalle} transparent animationType="fade">
-        <View style={styles.modalBack}>
-          <View style={styles.modalCard}>
-            <ThemedText style={{ fontSize: 20, fontWeight: "700", marginBottom: 8 }}>
-              {selected?.nombre || "Detalle"}
-            </ThemedText>
+        <TouchableWithoutFeedback onPress={() => setShowDetalle(false)}>
+          <View style={styles.modalBack}>
+            <View style={styles.modalCard}>
+              <ThemedText style={{ fontSize: 20, fontWeight: "700", marginBottom: 8 }}>
+                {selected?.nombre || "Detalle"}
+              </ThemedText>
 
-            <ThemedText style={{ color: "#aaa", marginBottom: 6 }}>
-              Actual: ${fmt(selected?.cantidadActual || 0)} • Meta: ${fmt(selected?.meta || 0)}
-            </ThemedText>
+              <ThemedText style={{ color: "#aaa", marginBottom: 6 }}>
+                Actual: ${fmt(selected?.cantidadActual || 0)} • Meta: ${fmt(selected?.meta || 0)}
+              </ThemedText>
 
-            <View style={{ flexDirection: "row", marginBottom: 8 }}>
-              <TouchableOpacity
-                onPress={() => setMovimientoTipo("deposito")}
-                style={[
-                  styles.smallBtn,
-                  movimientoTipo === "deposito" ? { backgroundColor: "#3edc81" } : { backgroundColor: "#2a2a2a" },
-                ]}
-              >
-                <Text style={{ color: movimientoTipo === "deposito" ? "black" : "white" }}>Depositar</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: "row", marginBottom: 8 }}>
+                <TouchableOpacity
+                  onPress={() => setMovimientoTipo("deposito")}
+                  style={[
+                    styles.smallBtn,
+                    movimientoTipo === "deposito" ? { backgroundColor: "#3edc81" } : { backgroundColor: "#2a2a2a" },
+                  ]}
+                >
+                  <Text style={{ color: movimientoTipo === "deposito" ? "black" : "white" }}>Depositar</Text>
+                </TouchableOpacity>
 
-              <View style={{ width: 8 }} />
+                <View style={{ width: 8 }} />
 
-              <TouchableOpacity
-                onPress={() => setMovimientoTipo("retiro")}
-                style={[
-                  styles.smallBtn,
-                  movimientoTipo === "retiro" ? { backgroundColor: "#ff8b8b" } : { backgroundColor: "#2a2a2a" },
-                ]}
-              >
-                <Text style={{ color: movimientoTipo === "retiro" ? "black" : "white" }}>Retirar</Text>
-              </TouchableOpacity>
-            </View>
+                <TouchableOpacity
+                  onPress={() => setMovimientoTipo("retiro")}
+                  style={[
+                    styles.smallBtn,
+                    movimientoTipo === "retiro" ? { backgroundColor: "#ff8b8b" } : { backgroundColor: "#2a2a2a" },
+                  ]}
+                >
+                  <Text style={{ color: movimientoTipo === "retiro" ? "black" : "white" }}>Retirar</Text>
+                </TouchableOpacity>
 
-            <TextInput
-              placeholder="Monto"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              value={movimientoMonto}
-              onChangeText={setMovimientoMonto}
-              style={styles.input}
-            />
+                <View style={{ width: 8 }} />
 
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-              <TouchableOpacity onPress={() => { setShowDetalle(false); setEditando(false); setSelected(null); }} style={[styles.btn, { backgroundColor: "#2a2a2a", flex: 1 }]}>
-                <Text style={{ color: "white", textAlign: "center" }}>Cerrar</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setMovimientoTipo("transferencia")}
+                  style={[
+                    styles.smallBtn,
+                    movimientoTipo === "transferencia" ? { backgroundColor: "#c084fc" } : { backgroundColor: "#2a2a2a" },
+                  ]}
+                >
+                  <Text style={{ color: movimientoTipo === "transferencia" ? "black" : "white" }}>Transferir</Text>
+                </TouchableOpacity>
+              </View>
 
-              <TouchableOpacity onPress={ejecutarMovimiento} style={[styles.btn, { backgroundColor: "#5c6bf2", flex: 1 }]}>
-                <Text style={{ color: "white", textAlign: "center" }}>{movimientoTipo === "deposito" ? "Depositar" : "Retirar"}</Text>
-              </TouchableOpacity>
+              <TextInput
+                ref={movimientoInputRef}
+                placeholder="Monto"
+                placeholderTextColor="#999"
+                keyboardType="numeric"
+                value={movimientoMonto}
+                onChangeText={setMovimientoMonto}
+                style={styles.input}
+              />
+
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                <TouchableOpacity onPress={() => { setShowDetalle(false); setEditando(false); setSelected(null); }} style={[styles.btn, { backgroundColor: "#2a2a2a", flex: 1 }]}>
+                  <Text style={{ color: "white", textAlign: "center" }}>Cerrar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={ejecutarMovimiento} style={[styles.btn, { backgroundColor: "#5c6bf2", flex: 1 }]}>
+                  <Text style={{ color: "white", textAlign: "center" }}>
+                    {movimientoTipo === "deposito" ? "Depositar" : movimientoTipo === "retiro" ? "Retirar" : "Transferir"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );

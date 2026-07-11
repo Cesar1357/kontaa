@@ -35,5 +35,29 @@
         <data android:scheme="konta"/>
       </intent-filter>
     </activity>
+    <receiver android:name=".KontaWidgetProvider" android:exported="true">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/konta_widget_small_info"/>
+    </receiver>
+    <receiver android:name=".KontaWidgetMediumProvider" android:exported="true">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/konta_widget_medium_info"/>
+    </receiver>
+    <receiver android:name=".KontaWidgetLargeProvider" android:exported="true">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/konta_widget_large_info"/>
+    </receiver>
+    <receiver android:name=".KontaWidgetCreateProvider" android:exported="true">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/konta_widget_create_info"/>
+    </receiver>
   </application>
 </manifest>

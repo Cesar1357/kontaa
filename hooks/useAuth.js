@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import { auth } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 
 export function useAuth() {
   const [user, setUser] = useState(null);
@@ -9,6 +10,7 @@ export function useAuth() {
   const [uid, setUid] = useState('');
   const [displayname, setDisplayName] = useState('');
   const [correo, setCorreo] = useState('');
+  const [emailVerified, setEmailVerified] = useState(false);
   const [metadata, setMetadata] = useState({});
 
   useEffect(() => {
@@ -24,6 +26,7 @@ export function useAuth() {
           setUid(parsed.uid);
           setDisplayName(parsed.displayName || '');
           setCorreo(parsed.email || '');
+          setEmailVerified(Boolean(parsed.emailVerified));
           setMetadata(parsed.metadata || {});
         }
       } catch (err) {
@@ -33,27 +36,51 @@ export function useAuth() {
       // 2️⃣ Luego escuchamos cambios en Firebase
       unsub = onAuthStateChanged(auth, async (firebaseUser) => {
         if (firebaseUser) {
+          try {
+            // Forzamos refresh del usuario para obtener emailVerified actualizado.
+            await firebaseUser.reload();
+          } catch (reloadError) {
+            console.log('No se pudo refrescar el estado del usuario:', reloadError);
+          }
+
+          const refreshedUser = auth.currentUser || firebaseUser;
+          const verified = Boolean(refreshedUser.emailVerified);
+
           const userData = {
-            uid: firebaseUser.uid,
-            displayName: firebaseUser.displayName || '',
-            email: firebaseUser.email || '',
-            metadata: firebaseUser.metadata || {},
+            uid: refreshedUser.uid,
+            displayName: refreshedUser.displayName || '',
+            email: refreshedUser.email || '',
+            emailVerified: verified,
+            metadata: refreshedUser.metadata || {},
           };
 
-          setUser(firebaseUser);
+          setUser(refreshedUser);
           setUid(userData.uid);
           setDisplayName(userData.displayName);
           setCorreo(userData.email);
+          setEmailVerified(userData.emailVerified);
           setMetadata(userData.metadata);
 
           // Guardamos localmente
           await AsyncStorage.setItem('localUser', JSON.stringify(userData));
+
+          // Sincronizamos estado de verificación en Firestore.
+          await setDoc(
+            doc(db, 'users', userData.uid),
+            {
+              email: userData.email,
+              emailVerified: userData.emailVerified,
+              updatedAt: new Date(),
+            },
+            { merge: true },
+          );
         } else {
           // Si Firebase dice que no hay sesión, limpiamos todo
           setUser(null);
           setUid('');
           setDisplayName('');
           setCorreo('');
+          setEmailVerified(false);
           setMetadata({});
           await AsyncStorage.removeItem('localUser');
         }
@@ -67,5 +94,5 @@ export function useAuth() {
     return () => unsub && unsub();
   }, []);
 
-  return { user, loading, uid, displayname, correo, metadata };
+  return { user, loading, uid, displayname, correo, emailVerified, metadata };
 }

@@ -1,4 +1,5 @@
 import { db } from '@/config/firebase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { router } from "expo-router";
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
@@ -40,12 +41,22 @@ export const useNotifications = () => {
 
         console.log('Push Token:', token.data);
 
-        // Guardar el token en Firestore
+        // Generar o obtener deviceId único
+        let deviceId = await AsyncStorage.getItem('deviceId');
+        if (!deviceId) {
+          deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await AsyncStorage.setItem('deviceId', deviceId);
+        }
+
+        // Guardar el dispositivo en Firestore
         await setDoc(
-          doc(db, `users/${user.uid}`),
+          doc(db, `users/${user.uid}/devices/${deviceId}`),
           {
             pushToken: token.data,
-            pushTokenUpdatedAt: serverTimestamp(),
+            notificationsEnabled: true, // Por defecto activadas
+            deviceId,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
           },
           { merge: true }
         );

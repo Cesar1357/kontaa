@@ -1,38 +1,76 @@
+import { useThemeColor } from "@/hooks/useThemeColor";
 import { Ionicons } from "@expo/vector-icons";
 import {
-    collection,
-    getDocs,
-    limit,
-    query,
-    where,
+  collection,
+  getDocs,
+  limit,
+  query,
+  where,
 } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { RFValue } from "react-native-responsive-fontsize";
 import { db } from "../config/firebase";
 import { useAuth } from "../hooks/useAuth";
 
 export default function CardComparativaTransacciones() {
-  const { user } = useAuth();
-  const [mensaje, setMensaje] = useState<string | null>(null);
+  const { uid } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [sampleSize, setSampleSize] = useState(0);
+  const [insights, setInsights] = useState<Array<{ label: string; value: number; delta: number; positiveIsGood?: boolean }>>([]);
+  const cardsColor = useThemeColor({light:'',dark:''},'cardsMain');
+  const textColor = useThemeColor({light:'',dark:''},'text');
+
+  const styles = StyleSheet.create({
+  simpleCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: cardsColor,
+    borderRadius: 20,
+    padding: 16,
+    marginHorizontal: 10,
+    marginVertical: RFValue(10),
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 12 },
+    shadowRadius: 22,
+    elevation: 5,
+  },
+  simpleCardTitle: {
+    color: "#aaa",
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  simpleCardText: {
+    flex: 1,
+    color: textColor,
+    fontSize: 12,
+    lineHeight: 20,
+  },
+});
+
+  const getMedian = (values: number[]) => {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
+    return sorted[mid];
+  };
 
   useEffect(() => {
     const cargarComparativa = async () => {
-      if (!user) return;
+      if (!uid) return;
 
       try {
         const ahora = new Date();
         const hace7dias = new Date();
         hace7dias.setDate(ahora.getDate() - 7);
 
-        // 🔹 1. Obtener hasta 5 usuarios
-        const usersSnap = await getDocs(query(collection(db, "users"), limit(5)))
+        const usersSnap = await getDocs(query(collection(db, "users"), limit(25)));
 
-        let totalGlobalIngresos = 0;
-        let totalGlobalEgresos = 0;
-        let usuariosContados = 0;
-        let totalUserIngresos = 0;
-        let totalUserEgresos = 0;
+        const allUsersData: Array<{ uid: string; ingresos: number; egresos: number; neto: number }> = [];
+        let me = { ingresos: 0, egresos: 0, neto: 0 };
 
         for (const u of usersSnap.docs) {
           const transSnap = await getDocs(
@@ -53,64 +91,48 @@ export default function CardComparativaTransacciones() {
             }
           });
 
-          if (ingresos > 0 || egresos > 0) usuariosContados++;
+          const hasActivity = ingresos > 0 || egresos > 0;
+          if (!hasActivity) continue;
 
-          if (u.id === user.uid) {
-            totalUserIngresos = ingresos;
-            totalUserEgresos = egresos;
-          } else {
-            totalGlobalIngresos += ingresos;
-            totalGlobalEgresos += egresos;
+          const neto = ingresos - egresos;
+          allUsersData.push({ uid: u.id, ingresos, egresos, neto });
+
+          if (u.id === uid) {
+            me = { ingresos, egresos, neto };
           }
         }
 
-        // 🔹 2. Promedios globales (sin incluir al usuario actual)
-        const divisor = Math.max(usuariosContados - 1, 1);
-        const promedioIng = totalGlobalIngresos / divisor;
-        const promedioEgr = totalGlobalEgresos / divisor;
+        const peers = allUsersData.filter((item) => item.uid !== uid);
+        setSampleSize(peers.length);
 
-        // 🔹 3. Crear mensaje
-        let texto = "Sin datos suficientes aún 🕓";
-
-        if (usuariosContados > 1) {
-          const diffIng = promedioIng
-            ? ((totalUserIngresos - promedioIng) / promedioIng) * 100
-            : 0;
-          const diffEgr = promedioEgr
-            ? ((totalUserEgresos - promedioEgr) / promedioEgr) * 100
-            : 0;
-
-          if (diffIng > 0)
-            texto = `Has tenido un ${diffIng.toFixed(1)}% más ingresos que el promedio esta semana 💰`;
-          else if (diffIng < 0)
-            texto = `Has tenido un ${Math.abs(
-              diffIng.toFixed(1)
-            )}% menos ingresos que el promedio esta semana 💸`;
-          else texto = "Tus ingresos están justo en el promedio 🔄";
-
-          if (totalUserEgresos > 0 && promedioEgr > 0) {
-            if (diffEgr > 0)
-              texto += `\nHas gastado un ${diffEgr.toFixed(
-                1
-              )}% más que el promedio 💳`;
-            else if (diffEgr < 0)
-              texto += `\nHas gastado un ${Math.abs(
-                diffEgr.toFixed(1)
-              )}% menos que el promedio 💎`;
-          }
+        if (peers.length === 0) {
+          setInsights([]);
+          return;
         }
 
-        setMensaje(texto);
+        const medianIngresos = getMedian(peers.map((item) => item.ingresos));
+        const medianEgresos = getMedian(peers.map((item) => item.egresos));
+        const medianNeto = getMedian(peers.map((item) => item.neto));
+
+        const deltaIngresos = medianIngresos > 0 ? ((me.ingresos - medianIngresos) / medianIngresos) * 100 : 0;
+        const deltaEgresos = medianEgresos > 0 ? ((me.egresos - medianEgresos) / medianEgresos) * 100 : 0;
+        const deltaNeto = Math.abs(medianNeto) > 0 ? ((me.neto - medianNeto) / Math.abs(medianNeto)) * 100 : 0;
+
+        setInsights([
+          { label: 'Ingresos', value: me.ingresos, delta: deltaIngresos, positiveIsGood: true },
+          { label: 'Gastos', value: me.egresos, delta: deltaEgresos, positiveIsGood: false },
+          { label: 'Balance neto', value: me.neto, delta: deltaNeto, positiveIsGood: true },
+        ]);
       } catch (e) {
         console.error("Error en comparativa de transacciones:", e);
-        setMensaje("No se pudo obtener la comparación 😕");
+        setInsights([]);
       } finally {
         setLoading(false);
       }
     };
 
     cargarComparativa();
-  }, [user]);
+  }, [uid]);
 
   if (loading) {
     return (
@@ -121,33 +143,47 @@ export default function CardComparativaTransacciones() {
     );
   }
 
-  if (!mensaje) return null;
+  if (insights.length === 0) {
+    return (
+      <View style={styles.simpleCard}>
+        <Ionicons name="bar-chart-outline" size={22} color="#5c6bf2" style={{ marginRight: 10 }} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.simpleCardTitle}>Comparativa semanal</Text>
+          <Text style={styles.simpleCardText}>Sin datos suficientes aún para comparar.</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.simpleCard}>
-      <Ionicons name="trending-up" size={22} color="#5c6bf2" style={{ marginRight: 8 }} />
-      <Text style={styles.simpleCardText}>{mensaje}</Text>
+      <Ionicons name="stats-chart" size={22} color="#5c6bf2" style={{ marginRight: 10 }} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.simpleCardTitle}>Comparativa semanal</Text>
+        <Text style={[styles.simpleCardText, { marginBottom: 8 }]}>Comparado con {sampleSize} usuarios.</Text>
+
+        {insights.map((item) => {
+          const rawDelta = Number.isFinite(item.delta) ? item.delta : 0;
+          const isBetter = item.positiveIsGood ? rawDelta >= 0 : rawDelta <= 0;
+          const icon = rawDelta === 0 ? 'remove' : rawDelta > 0 ? 'arrow-up' : 'arrow-down';
+          const color = rawDelta === 0 ? '#94a3b8' : isBetter ? '#22c55e' : '#ef4444';
+
+          return (
+            <View key={item.label} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text style={{ color: textColor, fontSize: 12 }}>{item.label}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name={icon as any} size={12} color={color} style={{ marginRight: 4 }} />
+                <Text style={{ color, fontSize: 12, fontWeight: '700' }}>
+                  {Math.abs(rawDelta).toFixed(1)}%
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
+  
 }
 
-const styles = StyleSheet.create({
-  simpleCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#1c1c1e",
-    borderRadius: 16,
-    padding: 14,
-    marginHorizontal: 10,
-    marginBottom: 10,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  simpleCardText: {
-    flex: 1,
-    color: "white",
-    fontSize: 15,
-  },
-});
+

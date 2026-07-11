@@ -1,21 +1,27 @@
+import { useThemeColor } from '@/hooks/useThemeColor';
 import { router } from 'expo-router';
 import { sendPasswordResetEmail } from "firebase/auth";
 import { useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  ToastAndroid,
-  TouchableOpacity,
-  View
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    ToastAndroid,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { RFValue } from 'react-native-responsive-fontsize';
 import { auth } from '../../config/firebase';
 
 export default function Forgot() {
+  const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background');
+  const surfaceVariantColor = useThemeColor({ light: '', dark: '' }, 'surfaceVariant');
+  const textColor = useThemeColor({ light: '', dark: '' }, 'text');
+  const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
+  const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
   const [email, setEmail] = useState('');
 
   const forgot = async() => {
@@ -47,27 +53,27 @@ export default function Forgot() {
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor }]}>
         <View style={{}}>
           <Text
             style={{
               fontSize: RFValue(40),
               fontWeight: 'bold',
-              color: 'white',
+              color: textColor,
               alignSelf: 'center',
               marginTop: 0,
             }}>
             Konta
           </Text>
         </View>
-        <Text style={{ color: 'orange', marginTop: 10 }}>
+        <Text style={{ color: primaryColor, marginTop: 10 }}>
           Estás a punto de restablecer tu contraseña.
         </Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: surfaceVariantColor, color: textColor, borderColor }]}
           onChangeText={(text) => setEmail(text)}
           placeholder={'Email'}
-          placeholderTextColor={'white'}
+          placeholderTextColor={textColor}
           keyboardType='email-address'
         />
 
@@ -76,7 +82,7 @@ export default function Forgot() {
             style={{
               width: '80%',
               height: 38,
-              backgroundColor: '#6A6F66',
+              backgroundColor: primaryColor,
               borderRadius: 50,
               alignSelf: 'center',
             }}
@@ -87,7 +93,7 @@ export default function Forgot() {
                 fontWeight: 'bold',
                 alignSelf: 'center',
                 marginTop: 0,
-                color: '#111111',
+                color: 'white',
               }}>
               Enviar correo
             </Text>
@@ -102,16 +108,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: '#111111',
     justifyContent:"center"
   },
   input: {
-    backgroundColor: '#323232',
     borderRadius: 20,
     width: '85%',
-    color: 'white',
     paddingLeft: 10,
     height:50,
-    marginTop:130
+    marginTop:130,
+    borderWidth:1,
   },
 });

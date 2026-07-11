@@ -82,7 +82,7 @@ const ONBOARDING_STEPS = [
   {
     icon: 'heart-outline' as const,
     title: 'Suscripcion de apoyo',
-    description: 'Todas las suscripciones tienen los mismos beneficios. Sin suscripcion, funciones personalizadas quedan limitadas a 2 elementos.',
+    description: 'Desde 10 pesos mensuales. Todas las suscripciones tienen los mismos beneficios. Sin suscripcion, funciones personalizadas quedan limitadas a 2 elementos.',
   },
 ];
 

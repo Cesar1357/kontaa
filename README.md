@@ -22,9 +22,9 @@ rmdir /s /q android\.gradle
 
 
 GITHUB
-
+   git pull
    git add .
-   git commit -m "chore: add android prebuild folder"
+   git commit -m "text"
    git push -u origin main
 
    

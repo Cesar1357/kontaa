@@ -9,7 +9,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as LocalAuthentication from "expo-local-authentication";
 import { router, useLocalSearchParams } from 'expo-router';
 import { getAuth, sendEmailVerification, signOut, updateProfile } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -41,7 +41,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../config/firebase';
 
-type SettingsModal = 'profile' | 'editProfile' | 'security' | 'notifications' | 'theme' | 'subscription' | null;
+type SettingsModal = 'profile' | 'editProfile' | 'security' | 'notifications' | 'theme' | 'subscription' | 'suggestions' | null;
 
 interface SettingOption {
   id: string;
@@ -72,6 +72,8 @@ export default function Settings() {
   const [availableSubscriptions, setAvailableSubscriptions] = useState<Subscription[]>([]);
   const [syncingPlay, setSyncingPlay] = useState(false);
   const [sendingVerification, setSendingVerification] = useState(false);
+  const [suggestionText, setSuggestionText] = useState('');
+  const [sendingSuggestion, setSendingSuggestion] = useState(false);
 
   // Modal References
   const modalRef = useRef<BottomSheetModal>(null);
@@ -86,17 +88,10 @@ export default function Settings() {
   const themeBg = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
   const auth = getAuth();
   const PLAY_PACKAGE = 'com.cesar1357.konta';
-  const SUBSCRIPTION_SKUS: Record<number, string> = {
-    10: 'konta_support_10',
-    15: 'konta_support_15',
-    20: 'konta_support_20',
-  };
-  const SKU_TO_AMOUNT = Object.entries(SUBSCRIPTION_SKUS).reduce<Record<string, number>>((acc, [amount, sku]) => {
-    acc[sku] = Number(amount);
-    return acc;
-  }, {});
-  const supportedSkus = Object.values(SUBSCRIPTION_SKUS);
+  const SUBSCRIPTION_PRODUCT_ID = 'konta_support';
+  const supportedSkus = [SUBSCRIPTION_PRODUCT_ID];
   const openSubscriptionFromParamsHandledRef = useRef(false);
+  const pendingPurchaseAmountRef = useRef<number | null>(null);
 
   // Lifecycle Hooks
   useEffect(() => {
@@ -150,9 +145,9 @@ export default function Settings() {
         setSubscriptionData(supportData);
 
         const amount = Number(supportData?.amount || supportData?.pendingAmount || 0);
-        if (amount && [10, 15, 20].includes(amount)) {
-          setSelectedSupportAmount(amount as 10 | 15 | 20);
-          setCustomSupportAmount('');
+        if (amount) {
+          setSelectedSupportAmount(amount);
+          setCustomSupportAmount(String(amount));
         }
       } catch (error) {
         console.error('Error loading subscription data:', error);
@@ -174,7 +169,7 @@ export default function Settings() {
       try {
         await finishTransaction({ purchase, isConsumable: false });
 
-        const amount = SKU_TO_AMOUNT[sku] || 0;
+        const amount = pendingPurchaseAmountRef.current || Number(subscriptionData?.pendingAmount || subscriptionData?.amount || 0);
         await setDoc(
           doc(db, `users/${uid}`),
           {
@@ -182,7 +177,7 @@ export default function Settings() {
               active: true,
               pending: false,
               amount,
-              sku,
+              sku: SUBSCRIPTION_PRODUCT_ID,
               currency: 'MXN',
               source: 'google_play_billing',
               purchaseToken: purchase.purchaseToken ?? null,
@@ -200,9 +195,10 @@ export default function Settings() {
           active: true,
           pending: false,
           amount,
-          sku,
+          sku: SUBSCRIPTION_PRODUCT_ID,
           source: 'google_play_billing',
         }));
+        pendingPurchaseAmountRef.current = null;
         ToastAndroid.showWithGravity('Suscripción activada con Google Play', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
       } catch (error) {
         console.error('Error processing Play purchase:', error);
@@ -227,7 +223,24 @@ export default function Settings() {
         const products = await getSubscriptions({
           skus: supportedSkus,
         });
+        const details = products[0]?.subscriptionOfferDetails ?? [];
 
+        console.log('Subscription offer details count:', details.length);
+        console.log('Subscription offer details raw:', JSON.stringify(details, null, 2));
+        console.log(
+          'Subscription offer summary:',
+          details.map((offer: any) => ({
+            basePlanId: offer?.basePlanId,
+            offerId: offer?.offerId,
+            offerToken: offer?.offerToken,
+            pricingPhases: offer?.pricingPhases?.pricingPhaseList?.map((phase: any) => ({
+              formattedPrice: phase?.formattedPrice,
+              priceAmountMicros: phase?.priceAmountMicros,
+              billingPeriod: phase?.billingPeriod,
+            })),
+          }))
+        );
+        
         if (isMounted) {
           setAvailableSubscriptions(Array.isArray(products) ? products : []);
           setIapReady(true);
@@ -435,32 +448,111 @@ export default function Settings() {
     }
   };
 
-  const getAmountToUse = () => {
+  const handleSendSuggestion = async () => {
+    const message = suggestionText.trim();
+    if (!uid) return;
+
+    if (message.length < 8) {
+      Alert.alert('Sugerencia muy corta', 'Cuéntanos un poco más para poder evaluarla.');
+      return;
+    }
+
+    try {
+      setSendingSuggestion(true);
+      await addDoc(collection(db, 'appSuggestions'), {
+        uid,
+        email: correo || null,
+        displayName: displayname || null,
+        message,
+        source: 'settings',
+        status: 'new',
+        createdAt: serverTimestamp(),
+      });
+
+      setSuggestionText('');
+      ToastAndroid.showWithGravity('Gracias, tu sugerencia fue enviada', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
+      closeModal();
+    } catch (error) {
+      console.error('Error sending suggestion:', error);
+      Alert.alert('Error', 'No se pudo enviar tu sugerencia. Inténtalo de nuevo.');
+    } finally {
+      setSendingSuggestion(false);
+    }
+  };
+
+  function getAmountToUse() {
     if (selectedSupportAmount === 'custom') {
       const parsed = Number(customSupportAmount);
       return Number.isNaN(parsed) ? 0 : parsed;
     }
+
     return selectedSupportAmount;
-  };
+  }
 
-  const getSkuForAmount = (amount: number) => SUBSCRIPTION_SKUS[amount] || null;
+  function getFormattedPlanPrice(offer: any) {
+    const pricingPhases = offer?.pricingPhases?.pricingPhaseList || [];
+    const recurringPhase = pricingPhases[pricingPhases.length - 1] || pricingPhases[0] || null;
+    const priceAmountMicros = Number(recurringPhase?.priceAmountMicros ?? offer?.pricingPhases?.priceAmountMicros ?? 0);
 
-  const getAndroidOfferToken = (subscription: Subscription | undefined) => {
-    if (!subscription || !('subscriptionOfferDetails' in subscription)) return null;
-    return subscription.subscriptionOfferDetails?.[0]?.offerToken || null;
-  };
+    if (Number.isFinite(priceAmountMicros) && priceAmountMicros > 0) {
+      return priceAmountMicros / 1000000;
+    }
 
-  const getAndroidFormattedPrice = (subscription: Subscription | undefined) => {
-    if (!subscription || !('subscriptionOfferDetails' in subscription)) return null;
-    return subscription.subscriptionOfferDetails?.[0]?.pricingPhases?.pricingPhaseList?.[0]?.formattedPrice || null;
-  };
+    const formattedPrice = recurringPhase?.formattedPrice || offer?.pricingPhases?.formattedPrice || '';
+    const normalized = String(formattedPrice)
+      .replace(/\s/g, '')
+      .replace(/[^\d,.-]/g, '')
+      .replace(/\.(?=.*\.)/g, '')
+      .replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
 
-  const getPriceLabelForAmount = (amount: number) => {
-    const sku = getSkuForAmount(amount);
-    if (!sku) return `${amount} MXN`;
-    const product = availableSubscriptions.find((item) => item.productId === sku);
-    return getAndroidFormattedPrice(product) || `${amount} MXN`;
-  };
+  function getSubscriptionPlans(subscription: Subscription | undefined) {
+    if (!subscription || !('subscriptionOfferDetails' in subscription)) return [];
+
+    return (subscription.subscriptionOfferDetails || [])
+      .map((offer: any) => {
+        const amount = getFormattedPlanPrice(offer);
+        return {
+          amount,
+          offerToken: offer?.offerToken || null,
+          basePlanId: offer?.basePlanId || null,
+          formattedPrice: offer?.pricingPhases?.pricingPhaseList?.[offer?.pricingPhases?.pricingPhaseList?.length - 1]?.formattedPrice || null,
+        };
+      })
+      .filter((plan: any) => plan.offerToken && plan.amount > 0)
+      .sort((a: any, b: any) => a.amount - b.amount);
+  }
+
+  const subscriptionProduct = availableSubscriptions.find((item) => item.productId === SUBSCRIPTION_PRODUCT_ID);
+  const availableSupportPlans = useMemo(() => getSubscriptionPlans(subscriptionProduct), [subscriptionProduct]);
+  const closestSupportPlan = useMemo(() => {
+    const amount = getAmountToUse();
+    if (!amount || availableSupportPlans.length === 0) return null;
+
+    return availableSupportPlans.reduce((closest, plan) => {
+      if (!closest) return plan;
+
+      const closestDiff = Math.abs(closest.amount - amount);
+      const currentDiff = Math.abs(plan.amount - amount);
+
+      if (currentDiff < closestDiff) return plan;
+      if (currentDiff === closestDiff && plan.amount < closest.amount) return plan;
+      return closest;
+    }, null as { amount: number; offerToken: string; basePlanId: string | null; formattedPrice: string | null } | null);
+  }, [availableSupportPlans, customSupportAmount, selectedSupportAmount]);
+
+  useEffect(() => {
+    const amount = Number(subscriptionData?.amount || subscriptionData?.pendingAmount || 0);
+    if (!amount || availableSupportPlans.length === 0) return;
+
+    const hasExactPlan = availableSupportPlans.some((plan) => plan.amount === amount);
+    if (!hasExactPlan) {
+      setSelectedSupportAmount('custom');
+      setCustomSupportAmount(String(amount));
+    }
+  }, [availableSupportPlans, subscriptionData?.amount, subscriptionData?.pendingAmount]);
 
   const syncSubscriptionFromPlay = async (showToastOnNoResult = true) => {
     if (!uid || Platform.OS !== 'android' || !iapReady) return;
@@ -493,7 +585,7 @@ export default function Settings() {
       }
 
       const latest = [...subscriptionPurchases].sort((a, b) => Number(b.transactionDate || 0) - Number(a.transactionDate || 0))[0];
-      const amount = SKU_TO_AMOUNT[latest.productId] || 0;
+      const amount = Number(subscriptionData?.amount || subscriptionData?.pendingAmount || 0);
 
       await setDoc(
         doc(db, `users/${uid}`),
@@ -502,8 +594,8 @@ export default function Settings() {
             ...(subscriptionData || {}),
             active: true,
             pending: false,
-            amount,
-            sku: latest.productId,
+            ...(amount ? { amount } : {}),
+            sku: SUBSCRIPTION_PRODUCT_ID,
             currency: 'MXN',
             source: 'google_play_billing',
             purchaseToken: latest.purchaseToken ?? null,
@@ -519,8 +611,8 @@ export default function Settings() {
         ...(prev || {}),
         active: true,
         pending: false,
-        amount,
-        sku: latest.productId,
+        ...(amount ? { amount } : {}),
+        sku: SUBSCRIPTION_PRODUCT_ID,
         source: 'google_play_billing',
       }));
       ToastAndroid.showWithGravity('Suscripción sincronizada con Google Play', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
@@ -540,9 +632,9 @@ export default function Settings() {
       return;
     }
 
-    const sku = getSkuForAmount(amount);
-    if (!sku) {
-      Alert.alert('Monto no disponible', 'Por ahora solo están disponibles los planes de 10, 15 y 20 MXN en Google Play.');
+    const selectedPlan = closestSupportPlan;
+    if (!selectedPlan) {
+      Alert.alert('Monto no disponible', 'No se encontraron planes de Google Play para esta suscripción.');
       return;
     }
 
@@ -553,6 +645,7 @@ export default function Settings() {
 
     try {
       setProcessingSubscription(true);
+      pendingPurchaseAmountRef.current = amount;
       await setDoc(
         doc(db, `users/${uid}`),
         {
@@ -560,7 +653,9 @@ export default function Settings() {
             ...(subscriptionData || {}),
             pending: true,
             pendingAmount: amount,
-            pendingSku: sku,
+            pendingSku: SUBSCRIPTION_PRODUCT_ID,
+            pendingBasePlanAmount: selectedPlan.amount,
+            pendingBasePlanId: selectedPlan.basePlanId,
             currency: 'MXN',
             source: 'google_play_billing',
             updatedAt: new Date(),
@@ -569,18 +664,11 @@ export default function Settings() {
         { merge: true }
       );
 
-      const selectedSubscription = availableSubscriptions.find((item) => item.productId === sku);
-      const selectedOfferToken = getAndroidOfferToken(selectedSubscription);
-
-      if (!selectedOfferToken) {
-        throw new Error(`No se encontró una oferta válida para la suscripción ${sku}.`);
-      }
-
       await requestSubscription({
         subscriptionOffers: [
           {
-            sku,
-            offerToken: selectedOfferToken,
+            sku: SUBSCRIPTION_PRODUCT_ID,
+            offerToken: selectedPlan.offerToken,
           },
         ],
         obfuscatedAccountIdAndroid: uid,
@@ -588,6 +676,7 @@ export default function Settings() {
     } catch (error) {
       console.error('Error opening Play subscription:', error);
       Alert.alert('Error', 'No se pudo iniciar la compra en Google Play.');
+      pendingPurchaseAmountRef.current = null;
       setProcessingSubscription(false);
     } finally {
       // Se termina en listener de compra o error.
@@ -678,6 +767,13 @@ export default function Settings() {
       icon: 'card',
       description: subscriptionData?.active ? 'Activa en MXN' : 'Gestiona apoyo desde Google Play',
       onPress: () => openModal('subscription'),
+    },
+    {
+      id: 'suggestions',
+      title: 'Sugerencias',
+      icon: 'bulb',
+      description: 'Comparte ideas para nuevas funciones',
+      onPress: () => openModal('suggestions'),
     },
     {
       id: 'privacy',
@@ -1017,6 +1113,11 @@ export default function Settings() {
     const amount = getAmountToUse();
     const isActive = Boolean(subscriptionData?.active);
     const isPending = Boolean(subscriptionData?.pending);
+    const primaryActionLabel = closestSupportPlan
+      ? selectedSupportAmount === 'custom'
+        ? `Suscribirme con ${closestSupportPlan.amount} MXN`
+        : `Suscribirme con ${amount} MXN`
+      : 'Suscribirme en Google Play';
 
     return (
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 20 }} style={{ backgroundColor: themeBg }}>
@@ -1044,12 +1145,16 @@ export default function Settings() {
         <View style={{ backgroundColor: cardsMain, borderRadius: 12, padding: 16, marginBottom: 14 }}>
           <Text style={{ color: textColor, fontWeight: '700', marginBottom: 10 }}>Elige tu apoyo</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            {[10, 15, 20].map((value) => {
-              const selected = selectedSupportAmount === value;
+            {availableSupportPlans.map((plan) => {
+              const selected = selectedSupportAmount === plan.amount;
+              const recommended = selectedSupportAmount === 'custom' && closestSupportPlan?.amount === plan.amount;
               return (
                 <TouchableOpacity
-                  key={`support-${value}`}
-                  onPress={() => setSelectedSupportAmount(value)}
+                  key={`support-${plan.amount}-${plan.basePlanId || 'base'}`}
+                  onPress={() => {
+                    setSelectedSupportAmount(plan.amount);
+                    setCustomSupportAmount(String(plan.amount));
+                  }}
                   style={{
                     paddingHorizontal: 12,
                     paddingVertical: 8,
@@ -1057,13 +1162,13 @@ export default function Settings() {
                     marginRight: 8,
                     marginBottom: 8,
                     borderWidth: 1,
-                    borderColor: `${primaryColor}55`,
-                    backgroundColor: selected ? primaryColor : `${primaryColor}16`,
+                    borderColor: recommended ? '#f59e0b' : `${primaryColor}55`,
+                    backgroundColor: selected ? primaryColor : recommended ? '#f59e0b22' : `${primaryColor}16`,
                   }}
                 >
-                  <Text style={{ color: selected ? '#fff' : textColor, fontWeight: '700' }}>{value} MXN</Text>
+                  <Text style={{ color: selected ? '#fff' : textColor, fontWeight: '700' }}>{plan.amount} MXN</Text>
                   <Text style={{ color: selected ? '#fff' : `${textColor}b0`, fontSize: 11, marginTop: 2 }}>
-                    {getPriceLabelForAmount(value)}
+                    {plan.formattedPrice || `${plan.amount} MXN`}
                   </Text>
                 </TouchableOpacity>
               );
@@ -1077,32 +1182,41 @@ export default function Settings() {
                 borderRadius: 999,
                 marginRight: 8,
                 marginBottom: 8,
+                justifyContent: 'center',
+                alignItems: 'center',
                 borderWidth: 1,
                 borderColor: `${primaryColor}55`,
                 backgroundColor: selectedSupportAmount === 'custom' ? primaryColor : `${primaryColor}16`,
               }}
             >
-              <Text style={{ color: selectedSupportAmount === 'custom' ? '#fff' : textColor, fontWeight: '700' }}>Otro</Text>
+              <Text style={{ color: selectedSupportAmount === 'custom' ? '#fff' : textColor, fontWeight: '700', textAlign: 'center' }}>Otro</Text>
             </TouchableOpacity>
           </View>
 
           {selectedSupportAmount === 'custom' && (
-            <TextInput
-              value={customSupportAmount}
-              onChangeText={setCustomSupportAmount}
-              keyboardType="numeric"
-              placeholder="Monto personalizado en MXN"
-              placeholderTextColor={`${textColor}60`}
-              style={{
-                marginTop: 4,
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: `${primaryColor}35`,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-                color: textColor,
-              }}
-            />
+            <View style={{ marginTop: 4 }}>
+              <TextInput
+                value={customSupportAmount}
+                onChangeText={setCustomSupportAmount}
+                keyboardType="numeric"
+                placeholder="Monto personalizado en MXN"
+                placeholderTextColor={`${textColor}60`}
+                style={{
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: `${primaryColor}35`,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  color: textColor,
+                }}
+              />
+              {closestSupportPlan && (
+                <Text style={{ color: `${textColor}80`, fontSize: 12, marginTop: 8 }}>
+                  Se usará el plan más cercano: {closestSupportPlan.amount} MXN
+                  {closestSupportPlan.formattedPrice ? ` (${closestSupportPlan.formattedPrice})` : ''}.
+                </Text>
+              )}
+            </View>
           )}
 
           <Text style={{ color: `${textColor}80`, fontSize: 12, marginTop: 10 }}>
@@ -1112,20 +1226,24 @@ export default function Settings() {
 
         <TouchableOpacity
           onPress={handleOpenPlaySubscription}
-          disabled={processingSubscription || syncingPlay || !amount || selectedSupportAmount === 'custom'}
+          disabled={processingSubscription || syncingPlay || !amount || !closestSupportPlan || !iapReady}
           style={{
             backgroundColor: primaryColor,
             borderRadius: 10,
             paddingVertical: 12,
             alignItems: 'center',
             marginBottom: 10,
-            opacity: processingSubscription || syncingPlay || selectedSupportAmount === 'custom' ? 0.7 : 1,
+            opacity: processingSubscription || syncingPlay || !amount || !closestSupportPlan || !iapReady ? 0.7 : 1,
           }}
         >
           <Text style={{ color: '#fff', fontWeight: '700' }}>
-            {processingSubscription ? 'Procesando...' : 'Suscribirme en Google Play'}
+            {processingSubscription ? 'Procesando...' : primaryActionLabel}
           </Text>
         </TouchableOpacity>
+
+          <ThemedText style={{ paddingVertical:6, fontSize: 12, color: `${textColor}80`, marginBottom: 10 }}>
+            Debug
+          </ThemedText>
 
         <TouchableOpacity
           onPress={handleManualSubscriptionSync}
@@ -1180,6 +1298,62 @@ export default function Settings() {
       </ScrollView>
     );
   };
+
+  const renderSuggestionsModal = () => (
+    <View style={{ paddingHorizontal: 16, paddingVertical: 20, backgroundColor: themeBg, flex: 1 }}>
+      <Text style={{ fontSize: 24, fontWeight: 'bold', color: textColor, marginBottom: 12, textAlign: 'center' }}>
+        Sugerencias
+      </Text>
+
+      <Text style={{ color: `${textColor}b3`, fontSize: 13, marginBottom: 14, textAlign: 'center' }}>
+        ¿Qué te gustaría ver en Konta? Tu idea nos ayuda a priorizar nuevas funciones.
+      </Text>
+
+      <TextInput
+        value={suggestionText}
+        onChangeText={setSuggestionText}
+        multiline
+        numberOfLines={6}
+        textAlignVertical="top"
+        maxLength={400}
+        placeholder="Ejemplo: Me gustaría exportar movimientos a Excel..."
+        placeholderTextColor={`${textColor}66`}
+        style={{
+          minHeight: 150,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: `${primaryColor}40`,
+          backgroundColor: cardsMain,
+          color: textColor,
+          paddingHorizontal: 12,
+          paddingVertical: 12,
+          marginBottom: 8,
+        }}
+      />
+
+      <Text style={{ color: `${textColor}80`, fontSize: 11, marginBottom: 14 }}>
+        {suggestionText.trim().length}/400 caracteres
+      </Text>
+
+      <TouchableOpacity
+        onPress={handleSendSuggestion}
+        disabled={sendingSuggestion}
+        style={{
+          backgroundColor: primaryColor,
+          borderRadius: 10,
+          paddingVertical: 12,
+          alignItems: 'center',
+          opacity: sendingSuggestion ? 0.7 : 1,
+        }}
+      >
+        {sendingSuggestion ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={{ color: '#fff', fontWeight: '700' }}>Enviar sugerencia</Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <SafeAreaView style={{ backgroundColor: backgroundColor, flex: 1 }}>
@@ -1262,10 +1436,11 @@ export default function Settings() {
                 flexDirection: 'row',
                 alignItems: 'center',
                 marginLeft: 8,
+                justifyContent: 'center',
               }}
             >
               <Ionicons name="logo-instagram" size={16} color="#fff" />
-              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700', marginLeft: 8 }}>
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold', marginLeft: 8, textAlign: 'center' }}>
                 @emperblack
               </Text>
             </TouchableOpacity>
@@ -1300,6 +1475,7 @@ export default function Settings() {
         {activeModal === 'security' && renderSecurityModal()}
         {activeModal === 'theme' && renderThemeModal()}
         {activeModal === 'subscription' && renderSubscriptionModal()}
+        {activeModal === 'suggestions' && renderSuggestionsModal()}
       </BottomSheetModal>
     </SafeAreaView>
   );

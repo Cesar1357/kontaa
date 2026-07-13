@@ -1213,12 +1213,12 @@ export default function Inicio() {
                     borderRadius: 10,
                     paddingVertical: 10,
                     alignItems: 'center',
-                    backgroundColor: subscriptionActive ? '#16a34a' : primaryColor,
+                    backgroundColor: subscriptionActive ? '#16a34a' : '#a3164a',
                     marginBottom: 8,
                   }}
                 >
                   <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
-                    {subscriptionActive ? 'Suscripción activa' : 'Ir a Google Play en Ajustes'}
+                    {subscriptionActive ? 'Suscripción activa' : 'Apoyar'}
                   </ThemedText>
                 </TouchableOpacity>
               </ThemedView>

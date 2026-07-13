@@ -22,6 +22,7 @@ Tambien incluye widgets, accesos rapidos y tarjetas de informacion en Inicio par
 Konta esta pensada para estudiantes, profesionistas y cualquier persona que quiera organizar mejor su dinero con una app simple, rapida e inteligente.
 
 ## Novedades de esta version
+- Suscripciones de apoyo
 - Acciones rápidas de movimientos
 - Verificacion de correo para mayor seguridad.
 - Integracion con suscripcion premium en Google Play.

@@ -69,6 +69,7 @@ export default function AhorrosScreen() {
   const [meta, setMeta] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [plazo, setPlazo] = useState<PlazoAhorro | null>(null);
+  const [sinPlazo, setSinPlazo] = useState(false);
   const [fechaLimite, setFechaLimite] = useState<string | null>(null); // ISO string optional
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
 
@@ -264,6 +265,7 @@ export default function AhorrosScreen() {
     setMeta("");
     setDescripcion("");
     setPlazo(null);
+    setSinPlazo(false);
     setFechaLimite(null);
     setCantidadActual(0);
     setEditando(false);
@@ -276,6 +278,7 @@ export default function AhorrosScreen() {
 
   const handleFechaConfirm = (date: Date) => {
     setDatePickerVisible(false);
+    setSinPlazo(false);
     setFechaLimite(toIsoDate(date));
   };
 
@@ -294,14 +297,14 @@ export default function AhorrosScreen() {
       return;
     }
 
-    if (!plazo && !fechaLimite) {
+    if (!sinPlazo && !plazo && !fechaLimite) {
       Alert.alert("Error", "Selecciona un plazo (corto, mediano o largo) o una fecha probable.");
       return;
     }
 
     const now = new Date();
     let fechaObjetivo: Date | null = null;
-    if (fechaLimite) {
+    if (!sinPlazo && fechaLimite) {
       const parsed = parseFecha(fechaLimite);
       if (!parsed) {
         Alert.alert("Error", "La fecha probable debe estar en formato AAAA-MM-DD.");
@@ -312,7 +315,7 @@ export default function AhorrosScreen() {
         return;
       }
       fechaObjetivo = parsed;
-    } else if (plazo) {
+    } else if (!sinPlazo && plazo) {
       const objetivo = new Date(now);
       objetivo.setDate(objetivo.getDate() + PLAZO_DIAS[plazo]);
       fechaObjetivo = objetivo;
@@ -335,7 +338,7 @@ export default function AhorrosScreen() {
           meta: meta === "" ? "" : metaNum,
           cantidadActual: cantidadActual,
           descripcion: descripcion || "",
-          plazo: plazo,
+          plazo: sinPlazo ? null : plazo,
           fechaLimite: fechaObjetivo ? Timestamp.fromDate(fechaObjetivo) : null,
         });
         ToastAndroid.show("Meta actualizada", ToastAndroid.SHORT);
@@ -346,7 +349,7 @@ export default function AhorrosScreen() {
           meta: meta === "" ? "" : metaNum,
           cantidadActual: 0,
           descripcion: descripcion || "",
-          plazo: plazo,
+          plazo: sinPlazo ? null : plazo,
           creado: serverTimestamp(),
           fechaLimite: fechaObjetivo ? Timestamp.fromDate(fechaObjetivo) : null,
         });
@@ -358,6 +361,7 @@ export default function AhorrosScreen() {
       setMeta("");
       setDescripcion("");
       setPlazo(null);
+      setSinPlazo(false);
       setFechaLimite(null);
       setShowNuevo(false);
       setEditando(false);
@@ -520,8 +524,11 @@ export default function AhorrosScreen() {
     setNombre(a.nombre || "");
     setMeta(String(a.meta || ""));
     setDescripcion(a.descripcion || "");
+    const hasFechaLimite = Boolean(a.fechaLimite?.seconds);
+    const hasPlazo = Boolean(a.plazo);
     setPlazo(a.plazo || null);
-    setFechaLimite(a.fechaLimite ? new Date(a.fechaLimite.seconds * 1000).toISOString().slice(0, 10) : null);
+    setSinPlazo(!hasPlazo && !hasFechaLimite);
+    setFechaLimite(hasFechaLimite ? new Date(a.fechaLimite.seconds * 1000).toISOString().slice(0, 10) : null);
     setShowNuevo(true);
     setEditando(true);
     setCantidadActual(a.cantidadActual || 0);
@@ -724,13 +731,39 @@ export default function AhorrosScreen() {
                 onChangeText={setDescripcion}
                 style={styles.input}
               />
-
-              <ThemedText style={{ fontSize: 13, fontWeight: "600", marginBottom: 6 }}>
-                Plazo
-              </ThemedText>
+              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10, justifyContent: "space-between" }}>
+                <ThemedText style={{ fontSize: 13, fontWeight: "600", marginBottom: 6 }}>
+                  Plazo
+                </ThemedText>
+                <TouchableOpacity
+                  onPress={() => {
+                    setSinPlazo((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setPlazo(null);
+                        setFechaLimite(null);
+                      }
+                      return next;
+                    });
+                  }}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: sinPlazo ? "#5c6bf2" : "#3a3a3a",
+                    backgroundColor: sinPlazo ? "#5c6bf2" : "#2a2a2a",
+                  }}
+                >
+                  <Text style={{ color: "white", fontSize: 12, fontWeight: "600" }}>Sin plazo</Text>
+                </TouchableOpacity>
+              </View>
               <View style={{ flexDirection: "row", marginBottom: 10, justifyContent: "center" }}>
                 <TouchableOpacity
-                  onPress={() => setPlazo("corto")}
+                  onPress={() => {
+                    setSinPlazo(false);
+                    setPlazo("corto");
+                  }}
                   style={[
                     styles.smallBtn,
                     plazo === "corto" ? { backgroundColor: "#3edc81" } : { backgroundColor: "#2a2a2a" },
@@ -742,7 +775,10 @@ export default function AhorrosScreen() {
                 <View style={{ width: 8 }} />
 
                 <TouchableOpacity
-                  onPress={() => setPlazo("mediano")}
+                  onPress={() => {
+                    setSinPlazo(false);
+                    setPlazo("mediano");
+                  }}
                   style={[
                     styles.smallBtn,
                     plazo === "mediano" ? { backgroundColor: "#93c5fd" } : { backgroundColor: "#2a2a2a" },
@@ -754,7 +790,10 @@ export default function AhorrosScreen() {
                 <View style={{ width: 8 }} />
 
                 <TouchableOpacity
-                  onPress={() => setPlazo("largo")}
+                  onPress={() => {
+                    setSinPlazo(false);
+                    setPlazo("largo");
+                  }}
                   style={[
                     styles.smallBtn,
                     plazo === "largo" ? { backgroundColor: "#c084fc" } : { backgroundColor: "#2a2a2a" },
@@ -766,17 +805,19 @@ export default function AhorrosScreen() {
 
               <TouchableOpacity
                 onPress={openFechaPicker}
+                disabled={sinPlazo}
                 style={[
                   styles.input,
                   {
                     flexDirection: "row",
                     alignItems: "center",
                     justifyContent: "space-between",
+                    opacity: sinPlazo ? 0.5 : 1,
                   },
                 ]}
               >
                 <Text style={{ color: fechaLimite ? "white" : "#999" }}>
-                  {fechaLimite || "Fecha probable (opcional)"}
+                  {sinPlazo ? "Sin plazo seleccionado" : (fechaLimite || "Fecha probable (opcional)")}
                 </Text>
                 <Ionicons name="calendar-outline" size={18} color="#999" />
               </TouchableOpacity>
@@ -789,6 +830,7 @@ export default function AhorrosScreen() {
                     setMeta("");
                     setDescripcion("");
                     setPlazo(null);
+                    setSinPlazo(false);
                     setFechaLimite(null);
                     setShowNuevo(false);
                     setEditando(false);

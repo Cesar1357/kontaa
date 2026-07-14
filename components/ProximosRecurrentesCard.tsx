@@ -87,7 +87,7 @@ export default function ProximosRecurrentesCard() {
   }, [user?.uid]);
 
   const subtitle = useMemo(() => {
-    if (items.length === 0) return 'Aun no tienes recurrentes activos.';
+    if (items.length === 0) return 'Aún no tienes recurrentes activos.';
     return 'Tus proximos movimientos programados';
   }, [items.length]);
 
@@ -109,7 +109,7 @@ export default function ProximosRecurrentesCard() {
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
         <Ionicons name="calendar-outline" size={18} color={primaryColor} />
-        <ThemedText style={{ marginLeft: 8, fontSize: 15, fontWeight: '700' }}>Proximos recurrentes</ThemedText>
+        <ThemedText style={{ marginLeft: 8, fontSize: 15, fontWeight: '700' }}>Próximos recurrentes</ThemedText>
       </View>
       <ThemedText style={{ fontSize: 12, opacity: 0.82, marginBottom: 10 }}>{subtitle}</ThemedText>
 

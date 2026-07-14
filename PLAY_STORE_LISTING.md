@@ -25,7 +25,6 @@ Konta esta pensada para estudiantes, profesionistas y cualquier persona que quie
 - Suscripciones de apoyo
 - Acciones rápidas de movimientos
 - Verificacion de correo para mayor seguridad.
-- Integracion con suscripcion premium en Google Play.
 - Nuevas tarjetas informativas en Inicio.
 - Comparativa semanal mejorada.
 - Orden personalizable de secciones.

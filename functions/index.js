@@ -10,12 +10,113 @@
 
 const admin = require('firebase-admin');
 const functions = require('firebase-functions');
+const { google } = require('googleapis');
+const { onMessagePublished } = require('firebase-functions/v2/pubsub');
 
 admin.initializeApp();
 const db = admin.firestore();
 
 // Configuración de URLs de Expo
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+const KONTA_ANDROID_PACKAGE = process.env.KONTA_ANDROID_PACKAGE || 'com.cesar1357.konta';
+const PLAY_RT_SUBSCRIPTION_TOPIC = process.env.PLAY_RT_SUBSCRIPTION_TOPIC || 'play-subscription-events';
+
+const googleAuth = new google.auth.GoogleAuth({
+  scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+});
+
+const androidpublisher = google.androidpublisher({
+  version: 'v3',
+  auth: googleAuth,
+});
+
+function mapPlaySubscriptionState(subscriptionState) {
+  const state = subscriptionState || 'SUBSCRIPTION_STATE_UNSPECIFIED';
+  const activeStates = new Set([
+    'SUBSCRIPTION_STATE_ACTIVE',
+    'SUBSCRIPTION_STATE_IN_GRACE_PERIOD',
+  ]);
+
+  return {
+    state,
+    active: activeStates.has(state),
+  };
+}
+
+function getLatestLineItem(subscription) {
+  const lineItems = Array.isArray(subscription?.lineItems) ? subscription.lineItems : [];
+  if (lineItems.length === 0) return null;
+
+  return [...lineItems].sort((a, b) => {
+    const aExpiry = Number(a?.expiryTime || 0);
+    const bExpiry = Number(b?.expiryTime || 0);
+    return bExpiry - aExpiry;
+  })[0];
+}
+
+async function findUserByPurchaseToken(purchaseToken) {
+  const snap = await db
+    .collection('users')
+    .where('supportSubscription.purchaseToken', '==', purchaseToken)
+    .limit(1)
+    .get();
+
+  if (snap.empty) return null;
+  return snap.docs[0].id;
+}
+
+async function upsertSupportSubscription(uid, payload) {
+  await db.collection('users').doc(uid).set(
+    {
+      supportSubscription: {
+        source: 'google_play_server',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...payload,
+      },
+    },
+    { merge: true }
+  );
+}
+
+async function verifyPlaySubscriptionAndPersist({ uid, purchaseToken, packageName }) {
+  const targetPackageName = packageName || KONTA_ANDROID_PACKAGE;
+
+  const response = await androidpublisher.purchases.subscriptionsv2.get({
+    packageName: targetPackageName,
+    token: purchaseToken,
+  });
+
+  const subscription = response?.data || {};
+  const { active, state } = mapPlaySubscriptionState(subscription.subscriptionState);
+  const latestLineItem = getLatestLineItem(subscription);
+
+  const productId = latestLineItem?.productId || 'konta_support';
+  const expiryTime = latestLineItem?.expiryTime ? new Date(latestLineItem.expiryTime) : null;
+  const autoRenewEnabled = latestLineItem?.autoRenewingPlan?.autoRenewEnabled;
+
+  await upsertSupportSubscription(uid, {
+    active,
+    pending: false,
+    sku: productId,
+    productId,
+    packageName: targetPackageName,
+    purchaseToken,
+    orderId: subscription.latestOrderId || null,
+    state,
+    expiryTime,
+    autoRenewEnabled: typeof autoRenewEnabled === 'boolean' ? autoRenewEnabled : null,
+    lastVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return {
+    uid,
+    productId,
+    state,
+    active,
+    orderId: subscription.latestOrderId || null,
+    expiryTime: latestLineItem?.expiryTime || null,
+  };
+}
 
 /**
  * Obtiene los tokens de push de dispositivos con notificaciones activadas para un usuario
@@ -980,3 +1081,212 @@ exports.notifyPresupuestosPersonalizados = functions.scheduler
       return null;
     }
   });
+
+/**
+ * Verifica una suscripción de Google Play desde backend y actualiza Firestore.
+ * Uso recomendado:
+ * - Después de una compra exitosa
+ * - En sincronización manual desde la app
+ */
+exports.verifyPlaySubscription = functions.https.onCall(async (data, context) => {
+  const callerUid = context?.auth?.uid;
+  const requestedUid = typeof data?.uid === 'string' ? data.uid : null;
+  const purchaseToken = typeof data?.purchaseToken === 'string' ? data.purchaseToken : null;
+  const packageName = typeof data?.packageName === 'string' ? data.packageName : null;
+
+  if (!callerUid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debes iniciar sesión para verificar la suscripción.');
+  }
+
+  const uid = requestedUid || callerUid;
+  if (uid !== callerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'No puedes verificar suscripciones de otro usuario.');
+  }
+
+  if (!purchaseToken) {
+    throw new functions.https.HttpsError('invalid-argument', 'purchaseToken es requerido.');
+  }
+
+  try {
+    return await verifyPlaySubscriptionAndPersist({ uid, purchaseToken, packageName });
+  } catch (error) {
+    console.error('verifyPlaySubscription error:', error);
+
+    // Token inválido o suscripción no encontrada en Play => marcar como inactiva.
+    if (error?.code === 404 || error?.response?.status === 404) {
+      await upsertSupportSubscription(uid, {
+        active: false,
+        pending: false,
+        packageName: packageName || KONTA_ANDROID_PACKAGE,
+        purchaseToken,
+        state: 'NOT_FOUND',
+        lastVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      return {
+        uid,
+        active: false,
+        state: 'NOT_FOUND',
+      };
+    }
+
+    throw new functions.https.HttpsError('internal', 'No se pudo verificar la suscripción en servidor.');
+  }
+});
+
+/**
+ * Fallback programado para revalidar suscripciones en servidor.
+ * Corre aunque el usuario no abra la app y ayuda si RTDN falla o se retrasa.
+ */
+exports.reverifyPlaySubscriptionsScheduled = functions.scheduler
+  .onSchedule(
+    {
+      schedule: '0 */6 * * *',
+      timeZone: 'America/Mexico_City',
+    },
+    async () => {
+      console.log('Iniciando revalidación programada de suscripciones de Google Play');
+
+      try {
+        const usersSnapshot = await db.collection('users').select('supportSubscription').get();
+
+        let checked = 0;
+        let activeCount = 0;
+        let inactiveCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+
+        for (const userDoc of usersSnapshot.docs) {
+          const uid = userDoc.id;
+          const supportSubscription = userDoc.data()?.supportSubscription || {};
+          const purchaseToken = supportSubscription?.purchaseToken || null;
+          const packageName = supportSubscription?.packageName || KONTA_ANDROID_PACKAGE;
+
+          if (!purchaseToken) {
+            skippedCount += 1;
+            continue;
+          }
+
+          checked += 1;
+
+          try {
+            const result = await verifyPlaySubscriptionAndPersist({
+              uid,
+              purchaseToken,
+              packageName,
+            });
+
+            if (result.active) activeCount += 1;
+            else inactiveCount += 1;
+          } catch (error) {
+            if (error?.code === 404 || error?.response?.status === 404) {
+              inactiveCount += 1;
+              await upsertSupportSubscription(uid, {
+                active: false,
+                pending: false,
+                packageName,
+                purchaseToken,
+                state: 'NOT_FOUND',
+                lastVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              continue;
+            }
+
+            errorCount += 1;
+            console.error('Error revalidando suscripción programada:', {
+              uid,
+              message: error?.message || String(error),
+            });
+          }
+        }
+
+        console.log('Revalidación programada completada:', {
+          checked,
+          activeCount,
+          inactiveCount,
+          skippedCount,
+          errorCount,
+        });
+        return null;
+      } catch (error) {
+        console.error('Error general en reverifyPlaySubscriptionsScheduled:', error);
+        return null;
+      }
+    }
+  );
+
+/**
+ * RTDN de Google Play (Pub/Sub).
+ * Configura el tópico en Play Console con el mismo valor de PLAY_RT_SUBSCRIPTION_TOPIC.
+ */
+exports.onPlaySubscriptionRtdn = onMessagePublished(PLAY_RT_SUBSCRIPTION_TOPIC, async (event) => {
+  try {
+    const pubsubMessage = event?.data?.message;
+    const payload = pubsubMessage?.json || (() => {
+      try {
+        if (!pubsubMessage?.data) return {};
+        const decoded = Buffer.from(pubsubMessage.data, 'base64').toString('utf8');
+        return JSON.parse(decoded);
+      } catch {
+        return {};
+      }
+    })();
+
+    const packageName = payload?.packageName || KONTA_ANDROID_PACKAGE;
+    const subscriptionNotification = payload?.subscriptionNotification || null;
+    const purchaseToken = subscriptionNotification?.purchaseToken || null;
+
+    if (!purchaseToken) {
+      console.log('RTDN recibido sin purchaseToken, se ignora. Payload:', payload);
+      return null;
+    }
+
+    const uid = await findUserByPurchaseToken(purchaseToken);
+    if (!uid) {
+      console.log('RTDN sin usuario local asociado al token:', purchaseToken);
+      return null;
+    }
+
+    try {
+      const result = await verifyPlaySubscriptionAndPersist({ uid, purchaseToken, packageName });
+
+      await db.collection('users').doc(uid).collection('subscriptionEvents').add({
+        type: 'rtdn-verified',
+        notificationType: subscriptionNotification?.notificationType ?? null,
+        packageName,
+        purchaseToken,
+        result,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log('RTDN procesado y suscripción actualizada:', { uid, state: result.state, active: result.active });
+      return null;
+    } catch (verifyError) {
+      console.error('Error verificando RTDN en Google Play:', verifyError);
+
+      if (verifyError?.code === 404 || verifyError?.response?.status === 404) {
+        await upsertSupportSubscription(uid, {
+          active: false,
+          pending: false,
+          packageName,
+          purchaseToken,
+          state: 'NOT_FOUND',
+          lastVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        await db.collection('users').doc(uid).collection('subscriptionEvents').add({
+          type: 'rtdn-not-found',
+          notificationType: subscriptionNotification?.notificationType ?? null,
+          packageName,
+          purchaseToken,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      return null;
+    }
+  } catch (error) {
+    console.error('Error general procesando RTDN:', error);
+    return null;
+  }
+});

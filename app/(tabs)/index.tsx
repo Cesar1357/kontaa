@@ -24,6 +24,7 @@ import { auth, db } from '../../config/firebase';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { useAppTheme } from '@/hooks/ThemeContext';
 import { useThemeColor } from '@/hooks/useThemeColor';
 
 import BalanceHeader from '@/components/BalanceHeader';
@@ -61,18 +62,18 @@ const ONBOARDING_STEPS = [
   },
   {
     icon: 'flash-outline' as const,
-    title: 'Accesos rapidos y widgets',
+    title: 'Accesos rápidos y widgets',
     description: 'Crea acciones frecuentes para registrar movimientos en un toque desde Inicio o desde tus widgets.',
   },
   {
     icon: 'wallet-outline' as const,
     title: 'Presupuestos y control',
-    description: 'Asocia gastos a categorias para ver cuanto llevas y mantenerte dentro de tus limites.',
+    description: 'Asocia gastos a categorías para ver cuánto llevas y mantenerte dentro de tus límites.',
   },
   {
     icon: 'bar-chart-outline' as const,
     title: 'Historial y progreso',
-    description: 'Revisa tendencias, filtra periodos y sigue tu racha para mejorar tus habitos financieros.',
+    description: 'Revisa tendencias, filtra periodos y sigue tu racha para mejorar tus hábitos financieros.',
   },
   {
     icon: 'school-outline' as const,
@@ -90,6 +91,7 @@ const ONBOARDING_STEPS = [
 
 
 export default function Inicio() {
+  const { themeMode, setThemeMode } = useAppTheme();
   const cardMainColor = useThemeColor({light:'',dark:''},'cardMain');
   const textColor = useThemeColor({light:'',dark:''},'text');
   const primaryColor = useThemeColor({light:'',dark:''},'primary');
@@ -127,7 +129,8 @@ export default function Inicio() {
   const [showAddQuickActionsWidgetPrompt, setShowAddQuickActionsWidgetPrompt] = useState(false);
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
-  const [subscriptionActive, setSubscriptionActive] = useState(false);
+  const [subscriptionActive, setSubscriptionActive] = useState<boolean | null>(null);
+  const [subscriptionLoaded, setSubscriptionLoaded] = useState<boolean | null>(null);
   const [sendingVerification, setSendingVerification] = useState(false);
   const handledWidgetActionRef = useRef<Set<string>>(new Set());
 
@@ -200,7 +203,7 @@ export default function Inicio() {
 
   useEffect(() => {
     if (!user?.uid) {
-      setSubscriptionActive(false);
+        setSubscriptionLoaded(null);
       return;
     }
 
@@ -208,11 +211,21 @@ export default function Inicio() {
     const unsub = onSnapshot(userRef, (snap) => {
       const data = snap.data() || {};
       const support = (data as any).supportSubscription;
-      setSubscriptionActive(Boolean(support?.active));
+      if (support?.active !== undefined) {
+        setSubscriptionActive(Boolean(support?.active));
+        setSubscriptionLoaded(true);
+      }
     });
 
     return () => unsub();
   }, [user?.uid]);
+
+  useEffect(() => {
+    console.log('subscriptionActive changed:', subscriptionActive, 'subscriptionLoaded:', subscriptionLoaded, 'themeMode:', themeMode);
+    if (themeMode === 'grey' && subscriptionActive !== null && subscriptionActive === false && subscriptionLoaded === true) {
+      setThemeMode('system');
+    }
+  }, [subscriptionActive, subscriptionLoaded, themeMode, setThemeMode]);
 
   useEffect(() => {
     const loadGamificationPreference = async () => {
@@ -1332,16 +1345,21 @@ export default function Inicio() {
           opacity: headerOpacity,
         }}
       >
-        <ThemedText
-          style={{
-            fontSize: 30,
-            fontWeight: "800",
-            alignSelf: "flex-start",
-            padding: 5,
-          }}
-        >
-          Hola {user ? user.displayName : "Usuario"}
-        </ThemedText>
+        <View style={{ padding: 5, flexDirection: 'row', alignItems: 'center' }}>
+          {subscriptionActive && (
+            <Ionicons name="diamond" size={20} color="#16a34a" style={{ marginRight: 8 }} />
+          )}
+          <ThemedText
+            style={{
+              fontSize: 30,
+              fontWeight: "800",
+              alignSelf: "flex-start",
+              color: subscriptionActive ? '#16a34a' : textColor,
+            }}
+          >
+            Hola {user ? user.displayName : "Usuario"}
+          </ThemedText>
+        </View>
 
         <TouchableOpacity
           disabled={isHeaderHidden}

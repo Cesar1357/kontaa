@@ -70,7 +70,7 @@ export default function QuickAccessPanel({
     return (
       <ThemedView style={{ width: '95%', marginTop: 10, marginBottom: 4, backgroundColor: 'transparent' }}>
         <ThemedText style={{ fontSize: 13, fontWeight: '700', marginBottom: 8 }}>
-          Accesos rapidos
+          Accesos rápidos
         </ThemedText>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {quickActions.map((item: any) => {
@@ -106,7 +106,7 @@ export default function QuickAccessPanel({
           })}
         </ScrollView>
         <ThemedText style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>
-          Toque rapido: registra al instante. Manten presionado para abrir el modal editable.
+          Toque rápido: registra al instante. Mantén presionado para abrir el modal editable.
         </ThemedText>
       </ThemedView>
     );

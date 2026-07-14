@@ -10,6 +10,7 @@ import * as LocalAuthentication from "expo-local-authentication";
 import { router, useLocalSearchParams } from 'expo-router';
 import { getAuth, sendEmailVerification, signOut, updateProfile } from "firebase/auth";
 import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { httpsCallable } from 'firebase/functions';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,6 +18,7 @@ import {
   BackHandler,
   Linking,
   Platform,
+  Pressable,
   ScrollView,
   Switch,
   Text,
@@ -39,7 +41,7 @@ import {
   type Subscription,
 } from 'react-native-iap';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { db } from '../../config/firebase';
+import { db, functions as firebaseFunctions } from '../../config/firebase';
 
 type SettingsModal = 'profile' | 'editProfile' | 'security' | 'notifications' | 'theme' | 'subscription' | 'suggestions' | null;
 
@@ -74,6 +76,8 @@ export default function Settings() {
   const [sendingVerification, setSendingVerification] = useState(false);
   const [suggestionText, setSuggestionText] = useState('');
   const [sendingSuggestion, setSendingSuggestion] = useState(false);
+  const [showSubscriptionThanks, setShowSubscriptionThanks] = useState(false);
+  const [lastSubscribedAmount, setLastSubscribedAmount] = useState<number | null>(null);
 
   // Modal References
   const modalRef = useRef<BottomSheetModal>(null);
@@ -87,13 +91,33 @@ export default function Settings() {
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
   const themeBg = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
   const auth = getAuth();
+  const verifyPlaySubscriptionCallable = useMemo(
+    () => httpsCallable(firebaseFunctions, 'verifyPlaySubscription'),
+    []
+  );
   const PLAY_PACKAGE = 'com.cesar1357.konta';
   const SUBSCRIPTION_PRODUCT_ID = 'konta_support';
   const supportedSkus = [SUBSCRIPTION_PRODUCT_ID];
   const openSubscriptionFromParamsHandledRef = useRef(false);
   const pendingPurchaseAmountRef = useRef<number | null>(null);
+  const purchaseFlowActiveRef = useRef(false);
+  const processedPurchaseKeyRef = useRef<string | null>(null);
 
   // Lifecycle Hooks
+  const verifySubscriptionOnServer = async (purchaseToken: string | null | undefined) => {
+    if (!uid || !purchaseToken) return;
+
+    try {
+      await verifyPlaySubscriptionCallable({
+        uid,
+        purchaseToken,
+        packageName: PLAY_PACKAGE,
+      });
+    } catch (error) {
+      console.error('Server-side subscription verification failed:', error);
+    }
+  };
+
   useEffect(() => {
     const backAction = () => {
       if (activeModal) {
@@ -166,10 +190,17 @@ export default function Settings() {
       const sku = purchase.productId;
       if (!sku || !supportedSkus.includes(sku)) return;
 
+      const purchaseKey = `${purchase.purchaseToken || ''}:${purchase.transactionId || ''}:${purchase.transactionDate || ''}`;
+      if (processedPurchaseKeyRef.current === purchaseKey) {
+        return;
+      }
+
       try {
         await finishTransaction({ purchase, isConsumable: false });
+        processedPurchaseKeyRef.current = purchaseKey;
 
         const amount = pendingPurchaseAmountRef.current || Number(subscriptionData?.pendingAmount || subscriptionData?.amount || 0);
+        const wasUserInitiated = purchaseFlowActiveRef.current;
         await setDoc(
           doc(db, `users/${uid}`),
           {
@@ -198,20 +229,36 @@ export default function Settings() {
           sku: SUBSCRIPTION_PRODUCT_ID,
           source: 'google_play_billing',
         }));
+
+        verifySubscriptionOnServer(purchase.purchaseToken);
+
+        if (wasUserInitiated) {
+          modalRef.current?.dismiss();
+          setActiveModal(null);
+          setLastSubscribedAmount(amount || null);
+          setShowSubscriptionThanks(true);
+        }
+
         pendingPurchaseAmountRef.current = null;
-        ToastAndroid.showWithGravity('Suscripción activada con Google Play', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
       } catch (error) {
         console.error('Error processing Play purchase:', error);
-        Alert.alert('Error', 'No se pudo finalizar la compra con Google Play.');
+        if (purchaseFlowActiveRef.current) {
+          Alert.alert('Error', 'No se pudo finalizar la compra con Google Play.');
+        }
       } finally {
+        purchaseFlowActiveRef.current = false;
         setProcessingSubscription(false);
       }
     });
 
     const errorSub = purchaseErrorListener((error) => {
       console.error('Play Billing purchase error:', error);
+      const wasUserInitiated = purchaseFlowActiveRef.current;
+      purchaseFlowActiveRef.current = false;
+      pendingPurchaseAmountRef.current = null;
       setProcessingSubscription(false);
       if ((error as { code?: string }).code === 'E_USER_CANCELLED') return;
+      if (!wasUserInitiated) return;
       Alert.alert('Compra no completada', 'No se pudo completar la suscripción en Google Play.');
     });
 
@@ -223,7 +270,10 @@ export default function Settings() {
         const products = await getSubscriptions({
           skus: supportedSkus,
         });
-        const details = products[0]?.subscriptionOfferDetails ?? [];
+        const firstProduct = products[0];
+        const details = firstProduct && 'subscriptionOfferDetails' in firstProduct
+          ? firstProduct.subscriptionOfferDetails ?? []
+          : [];
 
         console.log('Subscription offer details count:', details.length);
         console.log('Subscription offer details raw:', JSON.stringify(details, null, 2));
@@ -615,6 +665,8 @@ export default function Settings() {
         sku: SUBSCRIPTION_PRODUCT_ID,
         source: 'google_play_billing',
       }));
+
+      verifySubscriptionOnServer(latest.purchaseToken);
       ToastAndroid.showWithGravity('Suscripción sincronizada con Google Play', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
     } catch (error) {
       console.error('Error syncing with Google Play:', error);
@@ -645,6 +697,7 @@ export default function Settings() {
 
     try {
       setProcessingSubscription(true);
+      purchaseFlowActiveRef.current = true;
       pendingPurchaseAmountRef.current = amount;
       await setDoc(
         doc(db, `users/${uid}`),
@@ -675,12 +728,30 @@ export default function Settings() {
       });
     } catch (error) {
       console.error('Error opening Play subscription:', error);
-      Alert.alert('Error', 'No se pudo iniciar la compra en Google Play.');
-      pendingPurchaseAmountRef.current = null;
+      const code = (error as { code?: string }).code;
+
+      // Algunos dispositivos lanzan error aquí aunque la compra continúa y se confirma por listener.
+      if (code === 'E_USER_CANCELLED') {
+        purchaseFlowActiveRef.current = false;
+        pendingPurchaseAmountRef.current = null;
+      }
+
       setProcessingSubscription(false);
     } finally {
       // Se termina en listener de compra o error.
     }
+  };
+
+  const handleDismissSubscriptionThanks = () => { 
+    setShowSubscriptionThanks(false);
+  };
+
+  const handleDebugTriggerSubscriptionThanks = () => {
+    const amount = getAmountToUse();
+    modalRef.current?.dismiss();
+    setActiveModal(null);
+    setLastSubscribedAmount(amount > 0 ? amount : null);
+    setShowSubscriptionThanks(true);
   };
 
   const handleOpenManageSubscriptions = async () => {
@@ -1048,10 +1119,17 @@ export default function Settings() {
         </Text>
         {themeOptions.map((option) => {
           const selected = themeMode === option.value;
+          const greyLocked = option.value === 'grey' && !subscriptionData?.active;
           return (
             <TouchableOpacity
               key={option.value}
-              onPress={() => setThemeMode(option.value)}
+              onPress={() => {
+                if (greyLocked) {
+                  Alert.alert('Tema premium', 'El tema gris está disponible solo con suscripción premium activa.');
+                  return;
+                }
+                setThemeMode(option.value);
+              }}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -1063,15 +1141,28 @@ export default function Settings() {
                 backgroundColor: selected ? `${primaryColor}16` : 'transparent',
                 borderWidth: 1,
                 borderColor: selected ? `${primaryColor}40` : borderColor,
+                opacity: greyLocked ? 0.45 : 1,
               }}
             >
-              <Text style={{ color: textColor, fontWeight: selected ? '700' : '500' }}>
-                {option.label}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ color: textColor, fontWeight: selected ? '700' : '500' }}>
+                  {option.label}
+                </Text>
+                {greyLocked && (
+                  <Text style={{ color: `${textColor}90`, fontSize: 11, fontWeight: '700', marginLeft: 8 }}>
+                    Premium
+                  </Text>
+                )}
+              </View>
               {selected ? (
                 <Icon type="ionicon" name="checkmark-circle" color={primaryColor} size={20} />
               ) : (
-                <Icon type="ionicon" name="ellipse-outline" color={`${textColor}80`} size={20} />
+                <Icon
+                  type="ionicon"
+                  name={greyLocked ? 'lock-closed' : 'ellipse-outline'}
+                  color={greyLocked ? `${textColor}70` : `${textColor}80`}
+                  size={20}
+                />
               )}
             </TouchableOpacity>
           );
@@ -1244,6 +1335,22 @@ export default function Settings() {
           <ThemedText style={{ paddingVertical:6, fontSize: 12, color: `${textColor}80`, marginBottom: 10 }}>
             Debug
           </ThemedText>
+
+        {/* <TouchableOpacity
+          onPress={handleDebugTriggerSubscriptionThanks}
+          style={{
+            borderWidth: 1,
+            borderColor: `${primaryColor}55`,
+            borderRadius: 10,
+            paddingVertical: 11,
+            alignItems: 'center',
+            marginBottom: 10,
+          }}
+        >
+          <Text style={{ color: textColor, fontWeight: '700' }}>
+            Probar overlay de agradecimiento
+          </Text>
+        </TouchableOpacity> */}
 
         <TouchableOpacity
           onPress={handleManualSubscriptionSync}
@@ -1423,7 +1530,7 @@ export default function Settings() {
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, alignItems: 'center' }}>
             <Text style={{ fontSize: 11, color: `${textColor}60`, textAlign: 'center' }}>
-              v2.0.0   | 
+              v2.0.1   | 
             </Text>
             <TouchableOpacity
               onPress={handleOpenInstagram}
@@ -1477,6 +1584,59 @@ export default function Settings() {
         {activeModal === 'subscription' && renderSubscriptionModal()}
         {activeModal === 'suggestions' && renderSuggestionsModal()}
       </BottomSheetModal>
+
+      {showSubscriptionThanks && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            backgroundColor: '#00000088',
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: 24,
+            zIndex: 1000,
+          }}
+        >
+          <View
+            style={{
+              width: '100%',
+              maxWidth: 380,
+              borderRadius: 16,
+              paddingVertical: 22,
+              paddingHorizontal: 18,
+              backgroundColor: cardsMain,
+              borderWidth: 1,
+              borderColor: `${primaryColor}40`,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 42, marginBottom: 6 }}>🎉</Text>
+            <Text style={{ color: textColor, fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 8 }}>
+              ¡Muchísimas gracias!
+            </Text>
+            <Text style={{ color: `${textColor}cc`, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 16 }}>
+              Tu apoyo es muy bien recibido.
+              {lastSubscribedAmount ? ` Gracias por suscribirte con ${lastSubscribedAmount} MXN.` : ' Gracias por tu suscripción.'}
+            </Text>
+            <Pressable
+              onPress={handleDismissSubscriptionThanks}
+              style={{
+                paddingHorizontal: 18,
+                paddingVertical: 11,
+                borderRadius: 10,
+                backgroundColor: primaryColor,
+                minWidth: 140,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Continuar</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }

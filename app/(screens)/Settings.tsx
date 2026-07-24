@@ -30,15 +30,15 @@ import {
 import { Icon } from 'react-native-elements';
 import {
   endConnection,
-  fetchProducts,
   finishTransaction,
   getAvailablePurchases,
+  getSubscriptions,
   initConnection,
   purchaseErrorListener,
   purchaseUpdatedListener,
-  requestPurchase,
-  type ProductSubscription,
+  requestSubscription,
   type Purchase,
+  type Subscription,
 } from 'react-native-iap';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, db, functions as firebaseFunctions } from '../../config/firebase';
@@ -78,7 +78,7 @@ export default function Settings() {
   const [customSupportAmount, setCustomSupportAmount] = useState('');
   const [processingSubscription, setProcessingSubscription] = useState(false);
   const [iapReady, setIapReady] = useState(false);
-  const [availableSubscriptions, setAvailableSubscriptions] = useState<ProductSubscription[]>([]);
+  const [availableSubscriptions, setAvailableSubscriptions] = useState<Subscription[]>([]);
   const [syncingPlay, setSyncingPlay] = useState(false);
   const [sendingVerification, setSendingVerification] = useState(false);
   const [suggestionText, setSuggestionText] = useState('');
@@ -372,13 +372,12 @@ export default function Settings() {
 
         if (!connected || !isMounted) return;
 
-        const products = (await fetchProducts({
+        const products = (await getSubscriptions({
           skus: supportedSkus,
-          type: 'subs',
         })) || [];
         const firstProduct = products[0];
-        const details = firstProduct && 'subscriptionOfferDetailsAndroid' in firstProduct
-          ? firstProduct.subscriptionOfferDetailsAndroid ?? []
+        const details = firstProduct && 'subscriptionOfferDetails' in firstProduct
+          ? firstProduct.subscriptionOfferDetails ?? []
           : [];
 
         console.log('Subscription offer details count:', details.length);
@@ -398,7 +397,7 @@ export default function Settings() {
         );
         
         if (isMounted) {
-          setAvailableSubscriptions(Array.isArray(products) ? products as ProductSubscription[] : []);
+          setAvailableSubscriptions(Array.isArray(products) ? products as Subscription[] : []);
           setIapReady(true);
         }
       } catch (error) {
@@ -664,10 +663,10 @@ export default function Settings() {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  function getSubscriptionPlans(subscription: ProductSubscription | undefined): SupportPlan[] {
-    if (!subscription || !('subscriptionOfferDetailsAndroid' in subscription)) return [];
+  function getSubscriptionPlans(subscription: Subscription | undefined): SupportPlan[] {
+    if (!subscription || !('subscriptionOfferDetails' in subscription)) return [];
 
-    return (subscription.subscriptionOfferDetailsAndroid || [])
+    return (subscription.subscriptionOfferDetails || [])
       .map((offer) => {
         const amount = getFormattedPlanPrice(offer);
         return {
@@ -681,7 +680,7 @@ export default function Settings() {
       .sort((a, b) => a.amount - b.amount);
   }
 
-  const subscriptionProduct = availableSubscriptions.find((item) => item.id === SUBSCRIPTION_PRODUCT_ID);
+  const subscriptionProduct = availableSubscriptions.find((item) => item.productId === SUBSCRIPTION_PRODUCT_ID);
   const availableSupportPlans = useMemo(() => getSubscriptionPlans(subscriptionProduct), [subscriptionProduct]);
   const closestSupportPlan = useMemo(() => {
     const amount = getAmountToUse();
@@ -866,20 +865,14 @@ export default function Settings() {
         { merge: true }
       );
 
-      await requestPurchase({
-        type: 'subs',
-        request: {
-          android: {
-            skus: [SUBSCRIPTION_PRODUCT_ID],
-            subscriptionOffers: [
-              {
-                sku: SUBSCRIPTION_PRODUCT_ID,
-                offerToken: selectedPlan.offerToken,
-              },
-            ],
-            obfuscatedAccountIdAndroid: uid,
+      await requestSubscription({
+        subscriptionOffers: [
+          {
+            sku: SUBSCRIPTION_PRODUCT_ID,
+            offerToken: selectedPlan.offerToken,
           },
-        },
+        ],
+        obfuscatedAccountIdAndroid: uid,
       });
     } catch (error) {
       console.error('Error opening Play subscription:', error);

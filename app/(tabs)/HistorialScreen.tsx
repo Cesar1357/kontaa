@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Dimensions, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Switch, ToastAndroid, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 import Animated, { FadeInDown, FadeOutUp, Layout, useSharedValue, withTiming } from "react-native-reanimated";
 import { RFValue } from 'react-native-responsive-fontsize';
@@ -99,6 +100,8 @@ export default function HistorialScreen() {
   const [showChartOrderModal, setShowChartOrderModal] = useState(false);
   const [chartCardsConfig, setChartCardsConfig] = useState<HistorialChartConfig[]>(HISTORIAL_CHART_CONFIG_DEFAULT);
   const [favoriteCharts, setFavoriteCharts] = useState<Array<{ key: HistorialChartKey; title: string; subtitle: string }>>([]);
+  const chartsBottomSheetRef = useRef<BottomSheetModal>(null);
+  const chartsBottomSheetSnapPoints = useMemo(() => ['100%'], []);
 
   const height = useSharedValue(0);
   const opacity = useSharedValue(0);
@@ -113,6 +116,18 @@ export default function HistorialScreen() {
   const visibleChartCards = useMemo(
     () => chartCardsConfig.filter((item) => item.visible).map((item) => ({ key: item.key, ...HISTORIAL_CHART_META[item.key] })),
     [chartCardsConfig]
+  );
+
+  const renderChartsBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        pressBehavior="close"
+      />
+    ),
+    []
   );
     
   const toggleExpanded = () => {
@@ -229,6 +244,15 @@ export default function HistorialScreen() {
     const idx = visibleChartCards.findIndex((item) => item.key === focusChartKey);
     if (idx >= 0) setActiveChartIndex(idx);
   }, [openCharts, focusChartKey, visibleChartCards]);
+
+  useEffect(() => {
+    if (isExpanded) {
+      chartsBottomSheetRef.current?.present();
+      return;
+    }
+
+    chartsBottomSheetRef.current?.dismiss();
+  }, [isExpanded]);
 
   const total = transacciones.reduce(
     (acc, t) => acc + (t.tipo === "ingreso" ? t.monto : -t.monto),
@@ -1110,13 +1134,17 @@ export default function HistorialScreen() {
       </View>
       </ScrollView>
 
-      <Modal
-        animationType="slide"
-        transparent={false}
-        visible={isExpanded}
-        onRequestClose={() => setIsExpanded(false)}
+      <BottomSheetModal
+        ref={chartsBottomSheetRef}
+        index={0}
+        snapPoints={chartsBottomSheetSnapPoints}
+        enableDynamicSizing={false}
+        backdropComponent={renderChartsBackdrop}
+        onDismiss={() => setIsExpanded(false)}
+        backgroundStyle={{ backgroundColor }}
+        handleIndicatorStyle={{ backgroundColor: `${primaryColor}aa` }}
       >
-        <View style={{ flex: 1, backgroundColor, paddingTop: 64, paddingHorizontal: 0, paddingBottom: 12 }}>
+        <View style={{ flex: 1, backgroundColor, paddingTop: 24, paddingHorizontal: 0, paddingBottom: 12 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 12 }}>
             <View>
               <ThemedText style={{ fontSize: 20, fontWeight: '700' }}>Gráficas</ThemedText>
@@ -1569,7 +1597,7 @@ export default function HistorialScreen() {
             </View>
           )}
         </View>
-      </Modal>
+      </BottomSheetModal>
 
       <Modal visible={showChartOrderModal && Boolean(subscriptionActive)} transparent animationType="fade" onRequestClose={() => setShowChartOrderModal(false)}>
         <TouchableWithoutFeedback onPress={() => setShowChartOrderModal(false)}>

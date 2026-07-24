@@ -4,13 +4,13 @@ import { useAppTheme } from '@/hooks/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet/src';
+import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as LocalAuthentication from "expo-local-authentication";
 import { router, useLocalSearchParams } from 'expo-router';
-import { getAuth, sendEmailVerification, signOut, updateProfile } from "firebase/auth";
+import { sendEmailVerification, signOut, updateProfile } from "firebase/auth";
 import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
-import { httpsCallable } from 'firebase/functions';
+import { httpsCallableFromURL } from 'firebase/functions';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -30,18 +30,18 @@ import {
 import { Icon } from 'react-native-elements';
 import {
   endConnection,
+  fetchProducts,
   finishTransaction,
   getAvailablePurchases,
-  getSubscriptions,
   initConnection,
   purchaseErrorListener,
   purchaseUpdatedListener,
-  requestSubscription,
+  requestPurchase,
+  type ProductSubscription,
   type Purchase,
-  type Subscription,
 } from 'react-native-iap';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { db, functions as firebaseFunctions } from '../../config/firebase';
+import { auth, db, functions as firebaseFunctions } from '../../config/firebase';
 
 type SettingsModal = 'profile' | 'editProfile' | 'security' | 'notifications' | 'theme' | 'subscription' | 'suggestions' | null;
 
@@ -51,6 +51,13 @@ interface SettingOption {
   icon: string;
   onPress: () => void;
   description?: string;
+}
+
+interface SupportPlan {
+  amount: number;
+  offerToken: string;
+  basePlanId: string | null;
+  formattedPrice: string | null;
 }
 
 export default function Settings() {
@@ -71,7 +78,7 @@ export default function Settings() {
   const [customSupportAmount, setCustomSupportAmount] = useState('');
   const [processingSubscription, setProcessingSubscription] = useState(false);
   const [iapReady, setIapReady] = useState(false);
-  const [availableSubscriptions, setAvailableSubscriptions] = useState<Subscription[]>([]);
+  const [availableSubscriptions, setAvailableSubscriptions] = useState<ProductSubscription[]>([]);
   const [syncingPlay, setSyncingPlay] = useState(false);
   const [sendingVerification, setSendingVerification] = useState(false);
   const [suggestionText, setSuggestionText] = useState('');
@@ -90,11 +97,12 @@ export default function Settings() {
   const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
   const themeBg = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
-  const auth = getAuth();
+
   const verifyPlaySubscriptionCallable = useMemo(
-    () => httpsCallable(firebaseFunctions, 'verifyPlaySubscription'),
-    []
-  );
+  () => httpsCallableFromURL(firebaseFunctions, 'https://verifyplaysubscription-bzkc3rrioq-uc.a.run.app'),
+  []
+);
+
   const PLAY_PACKAGE = 'com.cesar1357.konta';
   const SUBSCRIPTION_PRODUCT_ID = 'konta_support';
   const supportedSkus = [SUBSCRIPTION_PRODUCT_ID];
@@ -103,18 +111,56 @@ export default function Settings() {
   const purchaseFlowActiveRef = useRef(false);
   const processedPurchaseKeyRef = useRef<string | null>(null);
 
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const getAuthenticatedUserForSubscription = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser || !uid || currentUser.uid !== uid) {
+      return null;
+    }
+
+    // Fuerza token fresco para evitar `unauthenticated` intermitente en callable.
+    await currentUser.getIdToken(true);
+    return currentUser;
+  };
+
   // Lifecycle Hooks
   const verifySubscriptionOnServer = async (purchaseToken: string | null | undefined) => {
-    if (!uid || !purchaseToken) return;
+    if (!uid || !purchaseToken) {
+      return { ok: false, reason: 'missing_input' as const };
+    }
+
+    const currentUser = await getAuthenticatedUserForSubscription();
+    if (!currentUser) {
+      console.warn('Skipping server-side verification: auth session is not ready or does not match uid');
+      return { ok: false, reason: 'auth_not_ready' as const };
+    }
 
     try {
-      await verifyPlaySubscriptionCallable({
-        uid,
+      const result = await verifyPlaySubscriptionCallable({
         purchaseToken,
         packageName: PLAY_PACKAGE,
       });
+      return { ok: true, reason: 'verified' as const, data: result?.data || null };
     } catch (error) {
+      const code = (error as { code?: string })?.code || '';
+      if (code === 'functions/unauthenticated') {
+        // Reintento corto por carrera de sesión al cambiar de cuenta.
+        try {
+          await sleep(800);
+          await currentUser.getIdToken(true);
+          const retry = await verifyPlaySubscriptionCallable({
+            purchaseToken,
+            packageName: PLAY_PACKAGE,
+          });
+          return { ok: true, reason: 'verified' as const, data: retry?.data || null };
+        } catch (retryError) {
+          console.error('Server-side subscription verification retry failed:', retryError);
+          return { ok: false, reason: 'call_failed' as const };
+        }
+      }
       console.error('Server-side subscription verification failed:', error);
+      return { ok: false, reason: 'call_failed' as const };
     }
   };
 
@@ -201,6 +247,54 @@ export default function Settings() {
 
         const amount = pendingPurchaseAmountRef.current || Number(subscriptionData?.pendingAmount || subscriptionData?.amount || 0);
         const wasUserInitiated = purchaseFlowActiveRef.current;
+        const verified = await verifySubscriptionOnServer(purchase.purchaseToken);
+        const verifiedData = (verified as any)?.data || null;
+        const verifiedActive = Boolean((verifiedData as any)?.active);
+
+        if (!(verified as any)?.ok) {
+          if (wasUserInitiated) {
+            Alert.alert('Verificación pendiente', 'La compra se registró, pero no se pudo verificar en servidor ahora. Intenta "Sincronizar con Google Play" en unos segundos.');
+          }
+          pendingPurchaseAmountRef.current = null;
+          return;
+        }
+
+        if (!verifiedActive) {
+          await setDoc(
+            doc(db, `users/${uid}`),
+            {
+              supportSubscription: {
+                ...(subscriptionData || {}),
+                active: false,
+                pending: false,
+                amount,
+                sku: SUBSCRIPTION_PRODUCT_ID,
+                currency: 'MXN',
+                source: 'google_play_billing',
+                purchaseToken: purchase.purchaseToken ?? null,
+                orderId: purchase.transactionId ?? null,
+                updatedAt: new Date(),
+              },
+            },
+            { merge: true }
+          );
+
+          setSubscriptionData((prev: any) => ({
+            ...(prev || {}),
+            active: false,
+            pending: false,
+            amount,
+            sku: SUBSCRIPTION_PRODUCT_ID,
+            source: 'google_play_billing',
+          }));
+
+          if (wasUserInitiated) {
+            Alert.alert('Suscripción no verificada', 'Google Play no confirmó una suscripción activa para esta cuenta.');
+          }
+          pendingPurchaseAmountRef.current = null;
+          return;
+        }
+
         await setDoc(
           doc(db, `users/${uid}`),
           {
@@ -229,8 +323,6 @@ export default function Settings() {
           sku: SUBSCRIPTION_PRODUCT_ID,
           source: 'google_play_billing',
         }));
-
-        verifySubscriptionOnServer(purchase.purchaseToken);
 
         if (wasUserInitiated) {
           modalRef.current?.dismiss();
@@ -264,15 +356,29 @@ export default function Settings() {
 
     const setupIap = async () => {
       try {
-        const connected = await initConnection();
+        let connected = false;
+
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          try {
+            connected = await initConnection();
+            if (connected) break;
+          } catch (attemptError) {
+            console.warn(`Google Play Billing init attempt ${attempt} failed:`, attemptError);
+            if (attempt === 2) throw attemptError;
+          }
+
+          await sleep(1200);
+        }
+
         if (!connected || !isMounted) return;
 
-        const products = await getSubscriptions({
+        const products = (await fetchProducts({
           skus: supportedSkus,
-        });
+          type: 'subs',
+        })) || [];
         const firstProduct = products[0];
-        const details = firstProduct && 'subscriptionOfferDetails' in firstProduct
-          ? firstProduct.subscriptionOfferDetails ?? []
+        const details = firstProduct && 'subscriptionOfferDetailsAndroid' in firstProduct
+          ? firstProduct.subscriptionOfferDetailsAndroid ?? []
           : [];
 
         console.log('Subscription offer details count:', details.length);
@@ -292,7 +398,7 @@ export default function Settings() {
         );
         
         if (isMounted) {
-          setAvailableSubscriptions(Array.isArray(products) ? products : []);
+          setAvailableSubscriptions(Array.isArray(products) ? products as ProductSubscription[] : []);
           setIapReady(true);
         }
       } catch (error) {
@@ -309,7 +415,7 @@ export default function Settings() {
       errorSub.remove();
       endConnection().catch(() => undefined);
     };
-  }, [uid, subscriptionData?.startedAt]);
+  }, [uid]);
 
   useEffect(() => {
     if (params.openSubscription !== '1' || openSubscriptionFromParamsHandledRef.current) return;
@@ -558,11 +664,11 @@ export default function Settings() {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  function getSubscriptionPlans(subscription: Subscription | undefined) {
-    if (!subscription || !('subscriptionOfferDetails' in subscription)) return [];
+  function getSubscriptionPlans(subscription: ProductSubscription | undefined): SupportPlan[] {
+    if (!subscription || !('subscriptionOfferDetailsAndroid' in subscription)) return [];
 
-    return (subscription.subscriptionOfferDetails || [])
-      .map((offer: any) => {
+    return (subscription.subscriptionOfferDetailsAndroid || [])
+      .map((offer) => {
         const amount = getFormattedPlanPrice(offer);
         return {
           amount,
@@ -571,11 +677,11 @@ export default function Settings() {
           formattedPrice: offer?.pricingPhases?.pricingPhaseList?.[offer?.pricingPhases?.pricingPhaseList?.length - 1]?.formattedPrice || null,
         };
       })
-      .filter((plan: any) => plan.offerToken && plan.amount > 0)
-      .sort((a: any, b: any) => a.amount - b.amount);
+      .filter((plan): plan is SupportPlan => Boolean(plan.offerToken) && plan.amount > 0)
+      .sort((a, b) => a.amount - b.amount);
   }
 
-  const subscriptionProduct = availableSubscriptions.find((item) => item.productId === SUBSCRIPTION_PRODUCT_ID);
+  const subscriptionProduct = availableSubscriptions.find((item) => item.id === SUBSCRIPTION_PRODUCT_ID);
   const availableSupportPlans = useMemo(() => getSubscriptionPlans(subscriptionProduct), [subscriptionProduct]);
   const closestSupportPlan = useMemo(() => {
     const amount = getAmountToUse();
@@ -590,7 +696,7 @@ export default function Settings() {
       if (currentDiff < closestDiff) return plan;
       if (currentDiff === closestDiff && plan.amount < closest.amount) return plan;
       return closest;
-    }, null as { amount: number; offerToken: string; basePlanId: string | null; formattedPrice: string | null } | null);
+    }, null as SupportPlan | null);
   }, [availableSupportPlans, customSupportAmount, selectedSupportAmount]);
 
   useEffect(() => {
@@ -636,6 +742,43 @@ export default function Settings() {
 
       const latest = [...subscriptionPurchases].sort((a, b) => Number(b.transactionDate || 0) - Number(a.transactionDate || 0))[0];
       const amount = Number(subscriptionData?.amount || subscriptionData?.pendingAmount || 0);
+      const verified = await verifySubscriptionOnServer(latest.purchaseToken);
+      const verifiedData = (verified as any)?.data || null;
+      const verifiedActive = Boolean((verifiedData as any)?.active);
+
+      if (!(verified as any)?.ok) {
+        Alert.alert('No se pudo verificar', 'No fue posible verificar la suscripción con servidor en este momento. Intenta de nuevo en unos segundos.');
+        return;
+      }
+
+      if (!verifiedActive) {
+        await setDoc(
+          doc(db, `users/${uid}`),
+          {
+            supportSubscription: {
+              ...(subscriptionData || {}),
+              active: false,
+              pending: false,
+              source: 'google_play_billing',
+              purchaseToken: latest.purchaseToken ?? null,
+              orderId: latest.transactionId ?? null,
+              lastVerifiedAt: new Date(),
+              updatedAt: new Date(),
+            },
+          },
+          { merge: true }
+        );
+
+        setSubscriptionData((prev: any) => ({
+          ...(prev || {}),
+          active: false,
+          pending: false,
+          source: 'google_play_billing',
+        }));
+
+        Alert.alert('Sin suscripción activa', 'Google Play no confirmó una suscripción activa para esta cuenta.');
+        return;
+      }
 
       await setDoc(
         doc(db, `users/${uid}`),
@@ -666,7 +809,6 @@ export default function Settings() {
         source: 'google_play_billing',
       }));
 
-      verifySubscriptionOnServer(latest.purchaseToken);
       ToastAndroid.showWithGravity('Suscripción sincronizada con Google Play', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
     } catch (error) {
       console.error('Error syncing with Google Play:', error);
@@ -678,6 +820,13 @@ export default function Settings() {
 
   const handleOpenPlaySubscription = async () => {
     if (!uid || Platform.OS !== 'android') return;
+
+    const authenticatedUser = await getAuthenticatedUserForSubscription();
+    if (!authenticatedUser) {
+      Alert.alert('Sesión no lista', 'Vuelve a iniciar sesión y espera unos segundos antes de suscribirte.');
+      return;
+    }
+
     const amount = getAmountToUse();
     if (!amount || amount <= 0) {
       Alert.alert('Monto inválido', 'Selecciona un monto válido para continuar.');
@@ -717,14 +866,20 @@ export default function Settings() {
         { merge: true }
       );
 
-      await requestSubscription({
-        subscriptionOffers: [
-          {
-            sku: SUBSCRIPTION_PRODUCT_ID,
-            offerToken: selectedPlan.offerToken,
+      await requestPurchase({
+        type: 'subs',
+        request: {
+          android: {
+            skus: [SUBSCRIPTION_PRODUCT_ID],
+            subscriptionOffers: [
+              {
+                sku: SUBSCRIPTION_PRODUCT_ID,
+                offerToken: selectedPlan.offerToken,
+              },
+            ],
+            obfuscatedAccountIdAndroid: uid,
           },
-        ],
-        obfuscatedAccountIdAndroid: uid,
+        },
       });
     } catch (error) {
       console.error('Error opening Play subscription:', error);
@@ -763,6 +918,11 @@ export default function Settings() {
   };
 
   const handleManualSubscriptionSync = async () => {
+    const authenticatedUser = await getAuthenticatedUserForSubscription();
+    if (!authenticatedUser) {
+      Alert.alert('Sesión no lista', 'Inicia sesión nuevamente antes de sincronizar con Google Play.');
+      return;
+    }
     await syncSubscriptionFromPlay(true);
   };
 
@@ -1530,7 +1690,7 @@ export default function Settings() {
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, alignItems: 'center' }}>
             <Text style={{ fontSize: 11, color: `${textColor}60`, textAlign: 'center' }}>
-              v2.0.1   | 
+              v3.0.0   | 
             </Text>
             <TouchableOpacity
               onPress={handleOpenInstagram}
@@ -1559,7 +1719,7 @@ export default function Settings() {
           onPress={() => setIsTextVisible(!isTextVisible)}
           style={{ paddingHorizontal: 16, paddingVertical: 8, alignItems: 'center' }}
         >
-          <Text style={{ fontSize: 0, color: `${textColor}40` }}>
+          <Text style={{ fontSize: 1, opacity: 0, color: `${textColor}40` }}>
             Modo desarrollador
           </Text>
         </TouchableOpacity>

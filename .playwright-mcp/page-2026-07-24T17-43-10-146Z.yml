@@ -1,0 +1,19 @@
+- generic [ref=e3]:
+  - generic [ref=e4]: Log 1 of 1
+  - generic [ref=e8]:
+    - generic [ref=e9]: Server Error
+    - generic [ref=e11]: (0 , _auth.getReactNativePersistence) is not a function
+  - generic [ref=e14]:
+    - generic [ref=e15]: Call Stack
+    - generic [ref=e17]:
+      - generic [ref=e19] [cursor=pointer]:
+        - generic [ref=e20]: factory
+        - generic [ref=e21]: config/firebase.js
+      - generic [ref=e23] [cursor=pointer]:
+        - generic [ref=e24]: factory
+        - generic [ref=e25]: hooks/useAuth.js
+      - generic [ref=e27] [cursor=pointer]:
+        - generic [ref=e28]: factory
+        - generic [ref=e29]: components/NotificationTestPanel.tsx
+      - generic [ref=e30]: Collapse all 3 frames
+  - generic [ref=e34]: This error cannot be dismissed.

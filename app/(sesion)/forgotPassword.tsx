@@ -40,8 +40,9 @@ export default function Forgot() {
         console.log('Correo electrónico de restablecimiento de contraseña enviado con éxito. Verifica tu bandeja de entrada.');
       } catch (error) {
         // Manejar errores en caso de que el envío del correo electrónico falle
-        Alert.alert(error.message)
-        console.error('Error al enviar el correo electrónico de restablecimiento de contraseña:', error.message);
+        const message = error instanceof Error ? error.message : 'No se pudo enviar el correo de restablecimiento.';
+        Alert.alert(message)
+        console.error('Error al enviar el correo electrónico de restablecimiento de contraseña:', message);
       }
     }
     

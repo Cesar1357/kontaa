@@ -25,10 +25,10 @@ export async function sendLocalTestNotification(
         sound: 'default',
         badge: 1,
       },
-      trigger: {
-        type: 'timeInterval',
-        seconds: 2, // Envía en 2 segundos
-      },
+        trigger: {
+          type: 'timeInterval',
+          seconds: 2,
+        } as any,
     });
 
     console.log('Notificación local de prueba programada');
@@ -118,7 +118,7 @@ export function useTestNotifications() {
           trigger: {
             type: 'timeInterval',
             seconds: Object.keys(testNotifications).indexOf(key) * 3 + 1,
-          },
+          } as any,
         });
       }
 

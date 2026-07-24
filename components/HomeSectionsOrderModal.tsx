@@ -7,6 +7,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { useThemeColor } from '@/hooks/useThemeColor';
 
 export type HomeSectionKey =
+  | 'favorite-charts'
   | 'quick-access'
   | 'weekly'
   | 'health'
@@ -23,6 +24,7 @@ export interface HomeSectionConfig {
 }
 
 export const HOME_SECTIONS_CONFIG_DEFAULT: HomeSectionConfig[] = [
+  { key: 'favorite-charts', visible: true },
   { key: 'quick-access', visible: true },
   { key: 'weekly', visible: true },
   { key: 'health', visible: true },
@@ -36,6 +38,7 @@ export const HOME_SECTIONS_CONFIG_DEFAULT: HomeSectionConfig[] = [
 ];
 
 const SECTION_LABELS: Record<HomeSectionKey, string> = {
+  'favorite-charts': 'Graficas favoritas',
   'quick-access': 'Accesos rapidos',
   weekly: 'Racha y resumen',
   health: 'Salud financiera semanal',

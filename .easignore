@@ -1,2 +1,48 @@
-# Include google-services.json for EAS builds
-!android/app/src/release/google-services.json
+# Dependencies installed remotely by EAS
+node_modules/
+functions/node_modules/
+
+# Local Expo / bundler state
+.expo/
+.metro-health-check*
+dist/
+web-build/
+
+# Git / editor / OS files
+.git/
+.github/
+.vscode/
+.DS_Store
+
+# Android build outputs and caches
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+
+# Logs and diagnostics
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Docs and local scripts not needed for app build
+README.md
+PLAY_STORE_LISTING.md
+functions/
+
+# Local secrets / service accounts that should not go into EAS archive
+konta-81b61-firebase-adminsdk-fbsvc-cbf0771f87.json
+*-firebase-adminsdk-*.json
+
+# Native signing / local keys
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# Keep the Android Firebase config required by app.json
+!google-services.json

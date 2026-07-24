@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Modal, Switch, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { Modal, ScrollView, Switch, TouchableOpacity, View } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -88,15 +88,25 @@ export default function HomeSectionsOrderModal({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)' }}>
-          <TouchableWithoutFeedback>
-            <ThemedView style={{ width: '88%', borderRadius: 16, padding: 16, backgroundColor: cardsMain }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={onClose}
+          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.45)' }}
+        />
+
+        <ThemedView style={{ width: '88%', maxHeight: '80%', borderRadius: 16, padding: 16, backgroundColor: cardsMain }}>
               <ThemedText style={{ fontSize: 18, fontWeight: '700', marginBottom: 4 }}>Personalizar inicio</ThemedText>
               <ThemedText style={{ fontSize: 12, opacity: 0.8, marginBottom: 12 }}>
                 Usa las flechas para reordenar y el switch para mostrar u ocultar cada seccion.
               </ThemedText>
 
+              <ScrollView
+                nestedScrollEnabled
+                style={{ flexGrow: 0, maxHeight: 420, marginBottom: 12 }}
+                contentContainerStyle={{ paddingBottom: 4 }}
+                showsVerticalScrollIndicator={false}
+              >
               {sections.map((item, index) => (
                 <View
                   key={item.key}
@@ -141,6 +151,7 @@ export default function HomeSectionsOrderModal({
                   </View>
                 </View>
               ))}
+              </ScrollView>
 
               <TouchableOpacity
                 onPress={() => onChangeSections(HOME_SECTIONS_CONFIG_DEFAULT)}
@@ -155,10 +166,8 @@ export default function HomeSectionsOrderModal({
               >
                 <ThemedText style={{ color: '#fff', fontWeight: '700' }}>Listo</ThemedText>
               </TouchableOpacity>
-            </ThemedView>
-          </TouchableWithoutFeedback>
-        </View>
-      </TouchableWithoutFeedback>
+        </ThemedView>
+      </View>
     </Modal>
   );
 }

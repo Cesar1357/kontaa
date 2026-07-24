@@ -1,9 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
 import * as Application from 'expo-application';
 import * as Haptics from 'expo-haptics';
 import { router } from "expo-router";
+import { useFocusEffect } from "expo-router/react-navigation";
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -178,7 +178,7 @@ export default function Inicio() {
       alignContent: "center",
     },
     celebrationOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       zIndex: 40,
       justifyContent: 'center',
       alignItems: 'center',
@@ -1272,7 +1272,7 @@ export default function Inicio() {
       {showOnboardingModal && (
         <View
           style={{
-            ...StyleSheet.absoluteFillObject,
+            ...StyleSheet.absoluteFill,
             zIndex: 60,
             backgroundColor: 'rgba(6, 8, 20, 0.64)',
             justifyContent: 'center',

@@ -12,13 +12,15 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
 export const useNotifications = () => {
   const { user, loading } = useAuth();
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
+  const notificationListener = useRef<Notifications.EventSubscription | null>(null);
+  const responseListener = useRef<Notifications.EventSubscription | null>(null);
 
   useEffect(() => {
     if (loading || !user?.uid) return;
@@ -77,15 +79,15 @@ export const useNotifications = () => {
     // Listener para cuando el usuario toca una notificación
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const data = response.notification.request.content.data;
+        const data = response.notification.request.content.data as { type?: string } | undefined;
         console.log('Usuario interactuó con notificación:', data);
 
         // Aquí puedes manejar la navegación según el tipo de notificación
-        if (data.type === 'ahorros') {
+        if (data?.type === 'ahorros') {
           // Navegar a ahorros
           console.log('Navegar a ahorros');
           router.push("/(tabs)/AhorrosScreen")
-        } else if (data.type === 'recurrente') {
+        } else if (data?.type === 'recurrente') {
           // Navegar a presupuestos
           console.log('Navegar a presupuestos');
           router.push("/(tabs)/PresupuestosScreen")

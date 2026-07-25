@@ -9,9 +9,9 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Dimensions, TouchableOpacity, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
 } from 'react-native-reanimated';
 import { RFValue } from 'react-native-responsive-fontsize';
 
@@ -29,7 +29,7 @@ export default function BalanceHeader() {
   const [diferencia, setDiferencia] = useState(0);
   const [chartData, setChartData] = useState<number[]>([]);
   const [chartLabels, setChartLabels] = useState<string[]>([]);
-  const [colorSaldo, setColorSaldo] = useState<'black' |'white' | '#ff4d4d'>('white');
+  const [colorSaldo, setColorSaldo] = useState<string>('white');
 
   const [range, setRange] = useState('1S');
   const [allData, setAllData] = useState<any[]>([]);

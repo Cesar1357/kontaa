@@ -5,26 +5,26 @@ import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  collection,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  Timestamp,
-  where,
+    collection,
+    doc,
+    onSnapshot,
+    orderBy,
+    query,
+    Timestamp,
+    where,
 } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Dimensions,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
 } from 'react-native-reanimated';
 import { RFValue } from 'react-native-responsive-fontsize';
 
@@ -47,7 +47,7 @@ export default function PresupuestoHeader() {
   const cardsColor = useThemeColor({light:'',dark:''},'cardsMain');
   const textColor = useThemeColor({light:'',dark:''},'text');
     
-  const [actualizar, setActualizar] = useState([]);
+  const [actualizar, setActualizar] = useState(0);
 
   const toggleExpanded = () => {
     const next = !expanded;
@@ -69,7 +69,7 @@ export default function PresupuestoHeader() {
   try {
     const ref = collection(db, `users/${user.uid}/transacciones`);
     const unsubscribe = onSnapshot(ref, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data: any[] = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setActualizar(data.length);
     });
 
@@ -127,7 +127,7 @@ export default function PresupuestoHeader() {
       const unsubscribe = onSnapshot(
         q,
         (snapshot) => {
-          const txs = snapshot.docs.map((d) => ({
+          const txs: any[] = snapshot.docs.map((d) => ({
             ...d.data(),
             date: d.data().fecha?.toDate(),
           }));

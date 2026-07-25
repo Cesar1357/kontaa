@@ -45,7 +45,7 @@ import { RFValue } from "react-native-responsive-fontsize";
  * - Modal de detalle (depositar / retirar / ver movimientos rápidos)
  *
  * Notas:
- * - No toca transacciones.
+ * - Puede registrar transferencias entre ahorro y transacciones.
  * - Guarda movimientos en subcollection "movimientos".
  */
 
@@ -81,7 +81,7 @@ export default function AhorrosScreen() {
 
   const [selected, setSelected] = useState<any>(null); // ahorro seleccionado
   const [movimientoMonto, setMovimientoMonto] = useState("");
-  const [movimientoTipo, setMovimientoTipo] = useState<"deposito" | "retiro" | "transferencia">("deposito");
+  const [movimientoTipo, setMovimientoTipo] = useState<"deposito" | "retiro" | "transferencia" | "pasarATransacciones">("deposito");
 
   const [editando, setEditando] = useState(false);
   const [cantidadActual, setCantidadActual] = useState(0);
@@ -449,7 +449,7 @@ export default function AhorrosScreen() {
           ? current + montoNum
           : current - montoNum;
 
-        if ((movimientoTipo === "retiro" || movimientoTipo === "transferencia") && newAmount < 0) {
+        if ((movimientoTipo === "retiro" || movimientoTipo === "transferencia" || movimientoTipo === "pasarATransacciones") && newAmount < 0) {
           throw new Error("No hay suficiente en la meta para retirar esa cantidad.");
         }
 
@@ -461,6 +461,19 @@ export default function AhorrosScreen() {
             fecha: serverTimestamp(),
             creadoAutomaticamente: false,
             origen: "transferencia-ahorro",
+            ahorroId: selected.id,
+            ahorroNombre: selected.nombre,
+          });
+        }
+
+        if (movimientoTipo === "pasarATransacciones") {
+          tx.set(doc(transaccionesRef), {
+            descripcion: `Retiro de ahorro: ${selected.nombre}`,
+            monto: montoNum,
+            tipo: "ingreso",
+            fecha: serverTimestamp(),
+            creadoAutomaticamente: false,
+            origen: "retiro-ahorro",
             ahorroId: selected.id,
             ahorroNombre: selected.nombre,
           });
@@ -482,7 +495,9 @@ export default function AhorrosScreen() {
               ? "Depósito manual"
               : movimientoTipo === "retiro"
                 ? "Retiro manual"
-                : "Transferencia desde saldo",
+                : movimientoTipo === "transferencia"
+                  ? "Transferencia desde saldo"
+                  : "Retiro hacia transacciones",
         };
         tx.set(doc(movsRef), movimientoDoc);
       });
@@ -547,7 +562,7 @@ export default function AhorrosScreen() {
           >
             <Text style={styles.headerTitle}>Ahorros</Text>
             <Text style={styles.headerSubtitle}>
-              Crea metas, aporta y registra movimientos. No aparecen en Transacciones.
+              Crea metas, aporta y registra movimientos. Puedes transferir desde y hacia Transacciones.
             </Text>
           </LinearGradient>
         </Animated.View>
@@ -907,7 +922,22 @@ export default function AhorrosScreen() {
                     movimientoTipo === "transferencia" ? { backgroundColor: "#c084fc" } : { backgroundColor: "#2a2a2a" },
                   ]}
                 >
-                  <Text style={{ color: movimientoTipo === "transferencia" ? "black" : "white" }}>Transferir</Text>
+                  <Text style={{ color: movimientoTipo === "transferencia" ? "black" : "white" }}>A ahorro</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ flexDirection: "row", marginBottom: 8 }}>
+                <TouchableOpacity
+                  onPress={() => setMovimientoTipo("pasarATransacciones")}
+                  style={[
+                    styles.smallBtn,
+                    { width: "100%" },
+                    movimientoTipo === "pasarATransacciones" ? { backgroundColor: "#f59e0b" } : { backgroundColor: "#2a2a2a" },
+                  ]}
+                >
+                  <Text style={{ color: movimientoTipo === "pasarATransacciones" ? "black" : "white", textAlign: "center" }}>
+                    A transacciones
+                  </Text>
                 </TouchableOpacity>
               </View>
 
@@ -928,7 +958,13 @@ export default function AhorrosScreen() {
 
                 <TouchableOpacity onPress={ejecutarMovimiento} style={[styles.btn, { backgroundColor: "#5c6bf2", flex: 1 }]}>
                   <Text style={{ color: "white", textAlign: "center" }}>
-                    {movimientoTipo === "deposito" ? "Depositar" : movimientoTipo === "retiro" ? "Retirar" : "Transferir"}
+                    {movimientoTipo === "deposito"
+                      ? "Depositar"
+                      : movimientoTipo === "retiro"
+                        ? "Retirar"
+                        : movimientoTipo === "transferencia"
+                          ? "Transferir a ahorro"
+                          : "Pasar a transacciones"}
                   </Text>
                 </TouchableOpacity>
               </View>

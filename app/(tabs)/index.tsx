@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Application from 'expo-application';
 import * as Haptics from 'expo-haptics';
 import { router } from "expo-router";
+import { useFocusEffect } from "expo-router/react-navigation";
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -19,7 +20,7 @@ import {
 
 import { StatusBar } from 'expo-status-bar';
 import { sendEmailVerification, type User } from 'firebase/auth';
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, setDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 
 import { ThemedText } from '@/components/ThemedText';
@@ -31,6 +32,7 @@ import BalanceHeader from '@/components/BalanceHeader';
 import BudgetHeader from '@/components/BudgetHeader';
 import CardComparativa from "@/components/ComparacionUsers";
 import FugasGastoCard from '@/components/FugasGastoCard';
+import HistorialFavoriteChartCard, { type HistorialChartKey } from '@/components/HistorialFavoriteChartCard';
 import HomeSectionsOrderModal, { HOME_SECTIONS_CONFIG_DEFAULT, type HomeSectionConfig, type HomeSectionKey } from '@/components/HomeSectionsOrderModal';
 import MetaMensualCard from '@/components/MetaMensualCard';
 import NuevaTransaccionModal from "@/components/NuevaTransaccionModal";
@@ -43,6 +45,7 @@ import SaludFinancieraCard from '@/components/SaludFinancieraCard';
 
 const HOME_SECTIONS_DEFAULT: HomeSectionKey[] = [
   'quick-access',
+  'favorite-charts',
   'weekly',
   'health',
   'upcoming',
@@ -83,7 +86,7 @@ const ONBOARDING_STEPS = [
   {
     icon: 'heart-outline' as const,
     title: 'Suscripcion de apoyo',
-    description: 'Desde 10 pesos mensuales. Todas las suscripciones tienen los mismos beneficios. Sin suscripcion, funciones personalizadas quedan limitadas a 2 elementos.',
+    description: 'Desde 10 pesos mensuales. Todas las suscripciones tienen los mismos beneficios. Sin suscripción, funciones personalizadas quedan limitadas a 2 elementos.',
   },
 ];
 
@@ -118,6 +121,8 @@ export default function Inicio() {
   const [isGamificationExpanded, setIsGamificationExpanded] = useState(true);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [preestablecidosRapidos, setPreestablecidosRapidos] = useState<any[]>([]);
+  const [historialTransactions, setHistorialTransactions] = useState<any[]>([]);
+  const [favoriteCharts, setFavoriteCharts] = useState<Array<{ key: HistorialChartKey; title: string; subtitle?: string }>>([]);
   const [prefillTransaccion, setPrefillTransaccion] = useState<any | null>(null);
   const [quickActionTick, setQuickActionTick] = useState(0);
   const [quickAccessPromoDismissed, setQuickAccessPromoDismissed] = useState(false);
@@ -134,6 +139,19 @@ export default function Inicio() {
   const [sendingVerification, setSendingVerification] = useState(false);
   const handledWidgetActionRef = useRef<Set<string>>(new Set());
 
+  const isHistorialChartKey = (value: string): value is HistorialChartKey => {
+    return [
+      'overview',
+      'bars',
+      'weekdayActivity',
+      'amountRanges',
+      'pieType',
+      'pieCategory',
+      'cumulative',
+      'trend',
+    ].includes(value);
+  };
+
   const scrollY = useRef(new Animated.Value(0)).current;
   const celebrationAnim = useRef(new Animated.Value(0)).current;
   const cardPulseAnim = useRef(new Animated.Value(1)).current;
@@ -147,6 +165,12 @@ export default function Inicio() {
     extrapolate: 'clamp',
   });
 
+  const headerTranslateY = scrollY.interpolate({
+    inputRange: [0, 80],
+    outputRange: [0, -36],
+    extrapolate: 'clamp',
+  });
+
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -154,7 +178,7 @@ export default function Inicio() {
       alignContent: "center",
     },
     celebrationOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       zIndex: 40,
       justifyContent: 'center',
       alignItems: 'center',
@@ -287,6 +311,26 @@ export default function Inicio() {
   }, [user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid) {
+      setHistorialTransactions([]);
+      return;
+    }
+
+    const ref = collection(db, 'users', user.uid, 'transacciones');
+    const q = query(ref, orderBy('fecha', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
+      const data = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        date: (d.data() as any).fecha?.toDate?.() || null,
+      }));
+      setHistorialTransactions(data);
+    });
+
+    return () => unsub();
+  }, [user?.uid]);
+
+  useEffect(() => {
     if (!user?.uid) return;
 
     const loadPromoPreference = async () => {
@@ -339,6 +383,60 @@ export default function Inicio() {
 
     loadQuickActionsWidgetPromptPreference();
   }, [user?.uid, preestablecidosRapidos.length]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setFavoriteCharts([]);
+      return;
+    }
+
+    const loadFavoriteCharts = async () => {
+      try {
+        const key = `konta.historial.favoriteCharts.${user.uid}`;
+        const raw = await AsyncStorage.getItem(key);
+        if (!raw) {
+          setFavoriteCharts([]);
+          return;
+        }
+        const parsed = JSON.parse(raw) as Array<{ key: string; title: string; subtitle?: string }>;
+        const valid = Array.isArray(parsed)
+          ? parsed.filter((item) => isHistorialChartKey(item.key)) as Array<{ key: HistorialChartKey; title: string; subtitle?: string }>
+          : [];
+        setFavoriteCharts(valid);
+      } catch (error) {
+        console.log('No se pudo cargar las graficas favoritas:', error);
+      }
+    };
+
+    loadFavoriteCharts();
+  }, [user?.uid]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!user?.uid) return () => {};
+
+      const refreshFavoriteCharts = async () => {
+        try {
+          const key = `konta.historial.favoriteCharts.${user.uid}`;
+          const raw = await AsyncStorage.getItem(key);
+          if (!raw) {
+            setFavoriteCharts([]);
+            return;
+          }
+          const parsed = JSON.parse(raw) as Array<{ key: string; title: string; subtitle?: string }>;
+          const valid = Array.isArray(parsed)
+            ? parsed.filter((item) => isHistorialChartKey(item.key)) as Array<{ key: HistorialChartKey; title: string; subtitle?: string }>
+            : [];
+          setFavoriteCharts(valid);
+        } catch (error) {
+          console.log('No se pudo refrescar las graficas favoritas:', error);
+        }
+      };
+
+      refreshFavoriteCharts();
+      return () => {};
+    }, [user?.uid])
+  );
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -794,6 +892,7 @@ export default function Inicio() {
   };
 
   const renderHomeSection = (section: HomeSectionKey) => {
+
     if (section === 'quick-access') {
       return (
         <QuickAccessPanel
@@ -807,6 +906,45 @@ export default function Inicio() {
           onQuickPress={registrarDesdePreestablecido}
           onQuickLongPress={openQuickInModal}
         />
+      );
+    }
+
+    if (section === 'favorite-charts') {
+      if (favoriteCharts.length === 0) return null;
+
+      return (
+        <ThemedView
+          style={{
+            backgroundColor: cardMainColor,
+            borderRadius: 18,
+            padding: 14,
+            marginBottom: 12,
+            borderWidth: 1,
+            borderColor: `${primaryColor}22`,
+            width: '95%',
+          }}
+        >
+          <ThemedText style={{ fontSize: 16, fontWeight: '700', marginBottom: 4 }}>Graficas favoritas</ThemedText>
+          <ThemedText style={{ fontSize: 12, opacity: 0.8, marginBottom: 10 }}>
+            Tus accesos directos de Historial.
+          </ThemedText>
+
+          {favoriteCharts.map((item) => (
+            <HistorialFavoriteChartCard
+              key={`favorite-chart-${item.key}`}
+              chartKey={item.key}
+              title={item.title}
+              subtitle={item.subtitle}
+              transactions={historialTransactions}
+              onPress={() =>
+                router.push({
+                  pathname: '/(tabs)/HistorialScreen',
+                  params: { openCharts: '1', focusChartKey: item.key },
+                })
+              }
+            />
+          ))}
+        </ThemedView>
       );
     }
 
@@ -1135,7 +1273,7 @@ export default function Inicio() {
       {showOnboardingModal && (
         <View
           style={{
-            ...StyleSheet.absoluteFillObject,
+            ...StyleSheet.absoluteFill,
             zIndex: 60,
             backgroundColor: 'rgba(6, 8, 20, 0.64)',
             justifyContent: 'center',
@@ -1160,8 +1298,8 @@ export default function Inicio() {
             }}
           >
             <ThemedView style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'transparent' }}>
-              <ThemedText style={{ fontSize: 12, fontWeight: '700', opacity: 0.8 }}>
-                Recorrido rapido
+              <ThemedText style={{ fontSize: 12, opacity: 0.8 }}>
+                Recorrido rápido
               </ThemedText>
               <TouchableOpacity onPress={handleSkipOnboarding} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
                 <ThemedText style={{ fontSize: 12, fontWeight: '700', color: '#94a3b8' }}>Omitir</ThemedText>
@@ -1220,19 +1358,23 @@ export default function Inicio() {
                 </ThemedText>
 
                 <TouchableOpacity
-                  disabled={subscriptionActive}
+                  disabled={Boolean(subscriptionActive)}
                   onPress={handleOpenSubscriptionSettings}
                   style={{
                     borderRadius: 10,
                     paddingVertical: 10,
                     alignItems: 'center',
-                    backgroundColor: subscriptionActive ? '#16a34a' : '#a3164a',
+                    backgroundColor: subscriptionActive ? '#16a34a' : '#E1306C',
                     marginBottom: 8,
+                    flexDirection: 'row',
+                    justifyContent: 'center',
                   }}
                 >
+                  <Ionicons name="heart" size={18} color="#fff" />
                   <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
                     {subscriptionActive ? 'Suscripción activa' : 'Apoyar'}
                   </ThemedText>
+                  <Ionicons name="heart" size={18} color="#fff" />
                 </TouchableOpacity>
               </ThemedView>
             )}
@@ -1343,6 +1485,7 @@ export default function Inicio() {
           flexDirection: "row",
           width: "94%",
           opacity: headerOpacity,
+          transform: [{ translateY: headerTranslateY }],
         }}
       >
         <View style={{ padding: 5, flexDirection: 'row', alignItems: 'center' }}>
@@ -1377,7 +1520,7 @@ export default function Inicio() {
         style={{ width: "100%", zIndex: 9, marginTop: -80 }}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
+          { useNativeDriver: true }
         )}
         scrollEventThrottle={16}
       >
@@ -1597,7 +1740,7 @@ export default function Inicio() {
       </Animated.ScrollView>
 
       <HomeSectionsOrderModal
-        visible={showOrderModal && subscriptionActive}
+        visible={showOrderModal && Boolean(subscriptionActive)}
         sections={homeSectionsConfig}
         onClose={() => setShowOrderModal(false)}
         onChangeSections={setHomeSectionsConfig}

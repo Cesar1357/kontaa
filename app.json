@@ -2,13 +2,12 @@
   "expo": {
     "name": "Konta",
     "slug": "Konta",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "description": "Konta es una app moderna para administrar tus finanzas personales con claridad. Registra ingresos, egresos y ahorros, crea presupuestos y metas, revisa tu progreso en tiempo real y recibe alertas útiles para mantener el control de tu dinero.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "konta",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "runtimeVersion": {
@@ -20,11 +19,10 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#111111"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.cesar1357.konta",
       "googleServicesFile": "./google-services.json",
       "permissions": [],
-      "runtimeVersion": "2.0.0"
+      "runtimeVersion": "3.0.0"
     },
     "web": {
       "bundler": "metro",
@@ -50,7 +48,10 @@
         }
       ],
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

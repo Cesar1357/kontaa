@@ -5,27 +5,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams } from 'expo-router';
 import {
-  Timestamp,
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  query,
-  setDoc,
-  updateDoc,
-  where,
+    Timestamp,
+    collection,
+    deleteDoc,
+    doc,
+    onSnapshot,
+    query,
+    setDoc,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
-  Alert,
-  Modal,
-  NativeModules,
-  Platform,
-  Text,
-  ToastAndroid,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    NativeModules,
+    Platform,
+    Text,
+    ToastAndroid,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
 } from "react-native";
 import { ScrollView, TextInput } from "react-native-gesture-handler";
 import Animated, { Layout } from "react-native-reanimated";
@@ -34,6 +35,7 @@ import { db } from "../../config/firebase";
 
 export default function PresupuestosScreen() {
   const { user } = useAuth();
+  const currentUserId = (user as { uid?: string } | null)?.uid ?? null;
   const params = useLocalSearchParams<{ section?: string }>();
   const [presupuestos, setPresupuestos] = useState<any[]>([{ categoria: "Otros" }]);
   const [presupuestoGeneral, setPresupuestoGeneral] = useState<any>({
@@ -103,24 +105,24 @@ export default function PresupuestosScreen() {
 
   // 📡 Presupuestos personalizados
   useEffect(() => {
-    if (!user) return;
+    if (!currentUserId) return;
     try{
-      const ref = collection(db, `users/${user.uid}/presupuestosPersonalizados`);
+      const ref = collection(db, `users/${currentUserId}/presupuestosPersonalizados`);
       const unsub = onSnapshot(ref, (snap) => {
-        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const data: any[] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setPresupuestos(data.concat([{ categoria: "Otros" }]));
       });
       return () => unsub();
     } catch(e){
       console.error("Error en useEffect de presupuestos personalizados:", e);
     }
-  }, [user]);
+  }, [currentUserId]);
 
   // 📡 Presupuestos generales
   useEffect(() => {
-    if (!user) return;
+    if (!currentUserId) return;
     try{
-      const ref = doc(db, `users/${user.uid}`);
+      const ref = doc(db, `users/${currentUserId}`);
       const unsub = onSnapshot(ref, (snap) => {
         const data = snap.data();
         if (snap.exists() && data?.presupuestos) {
@@ -132,13 +134,13 @@ export default function PresupuestosScreen() {
     } catch(e){
       console.error("Error en useEffect de presupuestos generales:", e);
     }
-  }, [user]);
+  }, [currentUserId]);
 
   // 📡 Transacciones del mes actual
   useEffect(() => {
-    if (!user) return;
+    if (!currentUserId) return;
     try{
-      const ref = collection(db, `users/${user.uid}/transacciones`);
+      const ref = collection(db, `users/${currentUserId}/transacciones`);
       const q = query(
         ref,
         where("fecha", ">=", Timestamp.fromDate(startOfMonth)),
@@ -154,14 +156,14 @@ export default function PresupuestosScreen() {
     } catch(e){
       console.error("Error en useEffect de transacciones:", e);
     }
-  }, [user]);
+  }, [currentUserId]);
 
   useEffect(() => {
-  if (!user) return;
+  if (!currentUserId) return;
 
   // Referencias a Firestore
-  const refGastos = collection(db, `users/${user.uid}/gastosRecurrentes`);
-  const refIngresos = collection(db, `users/${user.uid}/ingresosRecurrentes`);
+  const refGastos = collection(db, `users/${currentUserId}/gastosRecurrentes`);
+  const refIngresos = collection(db, `users/${currentUserId}/ingresosRecurrentes`);
 
   // Escuchar gastos recurrentes
   const unsubGastos = onSnapshot(refGastos, (snap) => {
@@ -180,13 +182,13 @@ export default function PresupuestosScreen() {
     unsubGastos();
     unsubIngresos();
   };
-}, [user]);
+}, [currentUserId]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!currentUserId) return;
 
-    const refMain = collection(db, `users/${user.uid}/preestablecidosMain`);
-    const refSubs = collection(db, `users/${user.uid}/preestablecidosSubs`);
+    const refMain = collection(db, `users/${currentUserId}/preestablecidosMain`);
+    const refSubs = collection(db, `users/${currentUserId}/preestablecidosSubs`);
 
     const unsubMain = onSnapshot(refMain, (snap) => {
       const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -202,10 +204,10 @@ export default function PresupuestosScreen() {
       unsubMain();
       unsubSubs();
     };
-  }, [user]);
+  }, [currentUserId]);
 
   useEffect(() => {
-    if (!user?.uid) {
+    if (!currentUserId) {
       setQuickWidgetPromptAlreadyAnswered(false);
       setShowAddQuickWidgetPrompt(false);
       return;
@@ -213,7 +215,7 @@ export default function PresupuestosScreen() {
 
     const loadQuickWidgetPromptChoice = async () => {
       try {
-        const key = `konta.widget.quickActionsPrompt.choice.${user.uid}`;
+        const key = `konta.widget.quickActionsPrompt.choice.${currentUserId}`;
         const savedChoice = await AsyncStorage.getItem(key);
         setQuickWidgetPromptAlreadyAnswered(savedChoice !== null);
       } catch (error) {
@@ -222,7 +224,7 @@ export default function PresupuestosScreen() {
     };
 
     loadQuickWidgetPromptChoice();
-  }, [user?.uid]);
+  }, [currentUserId]);
 
   useEffect(() => {
     if (initialSectionHandledRef.current) return;
@@ -329,6 +331,7 @@ export default function PresupuestosScreen() {
 
   // ➕ Agregar presupuesto personalizado
   const agregarPresupuesto = async () => {
+    if (!currentUserId) return;
     if (!nuevaCategoria || !nuevoLimite) return;
 
     const personalizadosCount = presupuestos.filter((p) => p.categoria !== "Otros").length;
@@ -343,7 +346,7 @@ export default function PresupuestosScreen() {
       return;
     }
     try {
-      const ref = doc(collection(db, `users/${user.uid}/presupuestosPersonalizados`));
+      const ref = doc(collection(db, `users/${currentUserId}/presupuestosPersonalizados`));
       await setDoc(ref, {
         categoria: nuevaCategoria,
         limite,
@@ -359,6 +362,7 @@ export default function PresupuestosScreen() {
   };
 
    const agregarRecurrente = async () => {
+    if (!currentUserId) return;
     const recurrentesCount = gastosRecurrentes.length + ingresosRecurrentes.length;
     if (!subscriptionActive && recurrentesCount >= FREE_LIMIT) {
       Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 recurrentes sin suscripcion.");
@@ -378,7 +382,7 @@ export default function PresupuestosScreen() {
         return;
       }
       
-      const ref = doc(collection(db, `users/${user.uid}/gastosRecurrentes`));
+      const ref = doc(collection(db, `users/${currentUserId}/gastosRecurrentes`));
       await setDoc(ref, {
         nombre: nuevoNombreRecurrente,
         categoria: nuevaCategoriaRecurrente || "General",
@@ -401,6 +405,7 @@ export default function PresupuestosScreen() {
   };
 
   const agregarRecurrenteIngreso = async () => {
+  if (!currentUserId) return;
   const recurrentesCount = gastosRecurrentes.length + ingresosRecurrentes.length;
   if (!subscriptionActive && recurrentesCount >= FREE_LIMIT) {
     Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 recurrentes sin suscripcion.");
@@ -421,7 +426,7 @@ export default function PresupuestosScreen() {
     }
 
 
-  const ref = doc(collection(db, `users/${user.uid}/ingresosRecurrentes`));
+  const ref = doc(collection(db, `users/${currentUserId}/ingresosRecurrentes`));
     await setDoc(ref, {
       nombre: nuevoNombreRecurrente,
       monto,
@@ -447,6 +452,7 @@ export default function PresupuestosScreen() {
   };
 
  const guardarEdicion = async () => {
+  if (!currentUserId || !presupuestoEditar) return;
   const valor = parseFloat(nuevoValorEditar);
   const diaPago = nuevoValorEditarFecha; // aquí es un número de 1–28
 
@@ -462,7 +468,7 @@ export default function PresupuestosScreen() {
     if (presupuestoEditar.tipo === "personalizado") {
       dataActualizacion.limite = valor;
       await updateDoc(
-        doc(db, `users/${user.uid}/presupuestosPersonalizados`, presupuestoEditar.id),
+        doc(db, `users/${currentUserId}/presupuestosPersonalizados`, presupuestoEditar.id),
         dataActualizacion
       );
     }
@@ -475,7 +481,7 @@ export default function PresupuestosScreen() {
         if (diaPago) dataActualizacion.diaPago = parseInt(diaPago);
 
         await updateDoc(
-          doc(db, `users/${user.uid}/gastosRecurrentes`, presupuestoEditar.id),
+          doc(db, `users/${currentUserId}/gastosRecurrentes`, presupuestoEditar.id),
           dataActualizacion
         );
       }
@@ -485,7 +491,7 @@ export default function PresupuestosScreen() {
         if (diaPago) dataActualizacion.diaPago = parseInt(diaPago);
 
         await updateDoc(
-          doc(db, `users/${user.uid}/ingresosRecurrentes`, presupuestoEditar.id),
+          doc(db, `users/${currentUserId}/ingresosRecurrentes`, presupuestoEditar.id),
           dataActualizacion
         );
       }
@@ -494,7 +500,7 @@ export default function PresupuestosScreen() {
 
     // --- PRESUPUESTOS GENERALES ---
     else {
-      await updateDoc(doc(db, `users/${user.uid}`), {
+      await updateDoc(doc(db, `users/${currentUserId}`), {
         [`presupuestos.${presupuestoEditar.categoria}`]: valor,
       });
     }
@@ -512,6 +518,7 @@ export default function PresupuestosScreen() {
     id: string,
     tipo: "gastos" | "ingresos"
   ) => {
+    if (!currentUserId) return;
     const mensaje =
       tipo === "gastos"
         ? "¿Deseas eliminar este gasto recurrente?"
@@ -525,8 +532,8 @@ export default function PresupuestosScreen() {
         onPress: async () => {
           const docRef =
             tipo === "gastos"
-              ? doc(db, "users", user.uid, "gastosRecurrentes", id)
-              : doc(db, "users", user.uid, "ingresosRecurrentes", id);
+              ? doc(db, "users", currentUserId, "gastosRecurrentes", id)
+              : doc(db, "users", currentUserId, "ingresosRecurrentes", id);
           await deleteDoc(docRef);
         },
       },
@@ -538,10 +545,11 @@ export default function PresupuestosScreen() {
     nuevoEstado: boolean,
     tipo: "gastos" | "ingresos"
   ) => {
+    if (!currentUserId) return;
     const docRef =
       tipo === "gastos"
-        ? doc(db, "users", user.uid, "gastosRecurrentes", id)
-        : doc(db, "users", user.uid, "ingresosRecurrentes", id);
+        ? doc(db, "users", currentUserId, "gastosRecurrentes", id)
+        : doc(db, "users", currentUserId, "ingresosRecurrentes", id);
 
     await updateDoc(docRef, {
       activo: nuevoEstado,
@@ -552,6 +560,7 @@ export default function PresupuestosScreen() {
 
   // ❌ Eliminar presupuesto personalizado
   const eliminarPresupuesto = async (id: string) => {
+    if (!currentUserId) return;
     Alert.alert("Eliminar", "¿Deseas eliminar este presupuesto?", [
       { text: "Cancelar", style: "cancel" },
       {
@@ -559,7 +568,7 @@ export default function PresupuestosScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            await deleteDoc(doc(db, `users/${user.uid}/presupuestosPersonalizados`, id));
+            await deleteDoc(doc(db, `users/${currentUserId}/presupuestosPersonalizados`, id));
           } catch (e) {
             console.error(e);
             Alert.alert("Error", "No se pudo eliminar.");
@@ -570,7 +579,7 @@ export default function PresupuestosScreen() {
   };
 
   const agregarPreestablecidoMain = async () => {
-    if (!user?.uid) return;
+    if (!currentUserId) return;
     if (!subscriptionActive && preestablecidosMain.length >= FREE_LIMIT) {
       Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 principales de preestablecidos sin suscripcion.");
       return;
@@ -581,7 +590,7 @@ export default function PresupuestosScreen() {
       return;
     }
 
-    const ref = doc(collection(db, `users/${user.uid}/preestablecidosMain`));
+    const ref = doc(collection(db, `users/${currentUserId}/preestablecidosMain`));
     await setDoc(ref, {
       nombre: nuevoMainNombre.trim(),
       icono: nuevoMainIcono.trim() || "💼",
@@ -595,7 +604,7 @@ export default function PresupuestosScreen() {
   };
 
   const agregarPreestablecidoSub = async (mainId: string) => {
-    if (!user?.uid) return;
+    if (!currentUserId) return;
     if (!subscriptionActive && preestablecidosSubs.length >= FREE_LIMIT) {
       Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 acciones preestablecidas sin suscripcion.");
       return;
@@ -613,7 +622,7 @@ export default function PresupuestosScreen() {
     }
 
     const main = preestablecidosMain.find((m) => m.id === mainId);
-    const ref = doc(collection(db, `users/${user.uid}/preestablecidosSubs`));
+    const ref = doc(collection(db, `users/${currentUserId}/preestablecidosSubs`));
     const quickActionsCount = preestablecidosSubs.filter((s) => s.accesoRapido).length;
     const shouldPromptWidget = nuevoSubRapido && quickActionsCount === 0 && !quickWidgetPromptAlreadyAnswered;
 
@@ -643,10 +652,10 @@ export default function PresupuestosScreen() {
   };
 
   const setQuickWidgetPromptChoice = async (choice: 'added' | 'dismissed') => {
-    if (!user?.uid) return;
+    if (!currentUserId) return;
 
     try {
-      const key = `konta.widget.quickActionsPrompt.choice.${user.uid}`;
+      const key = `konta.widget.quickActionsPrompt.choice.${currentUserId}`;
       await AsyncStorage.setItem(key, choice);
       setQuickWidgetPromptAlreadyAnswered(true);
     } catch (error) {
@@ -683,15 +692,15 @@ export default function PresupuestosScreen() {
   };
 
   const toggleSubRapido = async (id: string, estado: boolean) => {
-    if (!user?.uid) return;
-    await updateDoc(doc(db, `users/${user.uid}/preestablecidosSubs`, id), {
+    if (!currentUserId) return;
+    await updateDoc(doc(db, `users/${currentUserId}/preestablecidosSubs`, id), {
       accesoRapido: estado,
       updatedAt: new Date(),
     });
   };
 
   const toggleSubWidgetStar = async (id: string, estado: boolean) => {
-    if (!user?.uid) return;
+    if (!currentUserId) return;
 
     const estrellasActuales = preestablecidosSubs.filter((s) => s.widgetStarred).length;
     if (estado && estrellasActuales >= 3) {
@@ -699,14 +708,14 @@ export default function PresupuestosScreen() {
       return;
     }
 
-    await updateDoc(doc(db, `users/${user.uid}/preestablecidosSubs`, id), {
+    await updateDoc(doc(db, `users/${currentUserId}/preestablecidosSubs`, id), {
       widgetStarred: estado,
       updatedAt: new Date(),
     });
   };
 
   const eliminarPreestablecidoMain = async (id: string) => {
-    if (!user?.uid) return;
+    if (!currentUserId) return;
     Alert.alert("Eliminar", "Se eliminará el principal y sus sub preestablecidos.", [
       { text: "Cancelar", style: "cancel" },
       {
@@ -714,36 +723,44 @@ export default function PresupuestosScreen() {
         style: "destructive",
         onPress: async () => {
           const subs = preestablecidosSubs.filter((s) => s.mainId === id);
-          await Promise.all(subs.map((s) => deleteDoc(doc(db, `users/${user.uid}/preestablecidosSubs`, s.id))));
-          await deleteDoc(doc(db, `users/${user.uid}/preestablecidosMain`, id));
+          await Promise.all(subs.map((s) => deleteDoc(doc(db, `users/${currentUserId}/preestablecidosSubs`, s.id))));
+          await deleteDoc(doc(db, `users/${currentUserId}/preestablecidosMain`, id));
         },
       },
     ]);
   };
 
   const eliminarPreestablecidoSub = async (id: string) => {
-    if (!user?.uid) return;
+    if (!currentUserId) return;
     Alert.alert("Eliminar", "¿Deseas eliminar este sub preestablecido?", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Eliminar",
         style: "destructive",
         onPress: async () => {
-          await deleteDoc(doc(db, `users/${user.uid}/preestablecidosSubs`, id));
+          await deleteDoc(doc(db, `users/${currentUserId}/preestablecidosSubs`, id));
         },
       },
     ]);
   };
 
   return (
-    <ScrollView
-      style={{
-        flex: 1,
-        backgroundColor: backgroundColor2,
-        padding: 16,
-        paddingTop: 80,
-      }}
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={{ paddingBottom: 24 }}
+        style={{
+          flex: 1,
+          backgroundColor: backgroundColor2,
+          padding: 16,
+          paddingTop: 80,
+        }}
+      >
       
       {/* ENCABEZADO */}
       <LinearGradient
@@ -921,6 +938,7 @@ export default function PresupuestosScreen() {
                 placeholder="Icono o emoji (ej. 💼)"
                 placeholderTextColor="#888"
                 value={nuevoMainIcono}
+                maxLength={1}
                 onChangeText={setNuevoMainIcono}
                 style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 12, paddingVertical: 4 }}
               />
@@ -975,13 +993,13 @@ export default function PresupuestosScreen() {
                       <View style={{ flexDirection: "row", marginBottom: 10 }}>
                         <TouchableOpacity
                           onPress={() => setNuevoSubTipo("ingreso")}
-                          style={[styles.tipoBtn, { backgroundColor: nuevoSubTipo === "ingreso" ? "#3edc81" : "#2a2a2a" }]}
+                          style={[styles.tipoBtn, { backgroundColor: nuevoSubTipo === "ingreso" ? "#3edc81" : "#2a2a2a" } as const]}
                         >
                           <Text style={{ color: nuevoSubTipo === "ingreso" ? "black" : "white", fontWeight: "600" }}>Ingreso</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => setNuevoSubTipo("egreso")}
-                          style={[styles.tipoBtn, { backgroundColor: nuevoSubTipo === "egreso" ? "#ff6363" : "#2a2a2a" }]}
+                          style={[styles.tipoBtn, { backgroundColor: nuevoSubTipo === "egreso" ? "#ff6363" : "#2a2a2a" } as const]}
                         >
                           <Text style={{ color: nuevoSubTipo === "egreso" ? "black" : "white", fontWeight: "600" }}>Egreso</Text>
                         </TouchableOpacity>
@@ -1040,6 +1058,7 @@ export default function PresupuestosScreen() {
                         placeholder="Icono o emoji (ej. ⚡)"
                         placeholderTextColor="#888"
                         value={nuevoSubIcono}
+                        maxLength={1}
                         onChangeText={setNuevoSubIcono}
                         style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
                       />
@@ -1108,7 +1127,7 @@ export default function PresupuestosScreen() {
       {/* PRESUPUESTOS GENERALES */}
       {seccionActiva === "general" && (
         <Animated.View layout={Layout.springify()}>
-          {Object.entries(presupuestoGeneral).map(([categoria, valor]) => (
+          {Object.entries(presupuestoGeneral as Record<string, number>).map(([categoria, valor]) => (
             <View
               key={categoria}
               style={{
@@ -1129,7 +1148,7 @@ export default function PresupuestosScreen() {
                   {categoria.charAt(0).toUpperCase() + categoria.slice(1)}
                 </Text>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text style={{ color: "#aaa" }}>${valor.toFixed(2)}</Text>
+                  <Text style={{ color: "#aaa" }}>${Number(valor || 0).toFixed(2)}</Text>
                   <TouchableOpacity
                     onPress={() => abrirModalEditar({ categoria, valor }, "general")}
                   >
@@ -1569,78 +1588,85 @@ export default function PresupuestosScreen() {
     )}
       
 
-      {/* MODAL EDITAR */}
-      <Modal visible={modalEditar} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={() => setModalEditar(false)}>
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: "rgba(0,0,0,0.6)",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <View
-              style={{
-                width: "85%",
-                backgroundColor: backModalColor,
-                borderRadius: 16,
-                padding: 20,
-              }}
+        {/* MODAL EDITAR */}
+        <Modal visible={modalEditar} transparent animationType="fade">
+          <TouchableWithoutFeedback onPress={() => setModalEditar(false)}>
+            <KeyboardAvoidingView
+              style={{ flex: 1 }}
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
             >
-              <ThemedText style={{ fontSize: 18, fontWeight: "600", marginBottom: 12 }}>
-                Editar {presupuestoEditar?.tipo === "recurrente"? presupuestoEditar?.nombre: presupuestoEditar?.categoria}
-              </ThemedText>
-              <TextInput
-                placeholder="Nuevo valor"
-                placeholderTextColor="#888"
-                keyboardType="numeric"
-                value={nuevoValorEditar}
-                onChangeText={setNuevoValorEditar}
+              <View
                 style={{
-                  color: "#888",
-                  borderBottomColor: "#333",
-                  borderBottomWidth: 1,
-                  marginBottom: 16,
-                  paddingVertical: 4,
-                }}
-              />
-              {presupuestoEditar?.tipo === "recurrente" && (
-                <TextInput
-                  placeholder="Nueva dia (1-28)"
-                  placeholderTextColor="#888"
-                  keyboardType="numeric"
-                  value={nuevoValorEditarFecha}
-                  onChangeText={setNuevoValorEditarFecha}
-                  style={{
-                    color: "#888",
-                    borderBottomColor: "#333",
-                    borderBottomWidth: 1,
-                    marginBottom: 16,
-                    paddingVertical: 4,
-                  }}
-                />
-              )}
-              <TouchableOpacity
-                onPress={guardarEdicion}
-                style={{
-                  backgroundColor: "#5c6bf2",
-                  borderRadius: 10,
-                  paddingVertical: 10,
+                  flex: 1,
+                  backgroundColor: "rgba(0,0,0,0.6)",
+                  justifyContent: "center",
                   alignItems: "center",
-                  marginBottom: 10,
                 }}
               >
-                <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setModalEditar(false)}>
-                <Text style={{ color: "#aaa", textAlign: "center" }}>Cancelar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-    </ScrollView>
+                <View
+                  style={{
+                    width: "85%",
+                    backgroundColor: backModalColor,
+                    borderRadius: 16,
+                    padding: 20,
+                  }}
+                >
+                  <ThemedText style={{ fontSize: 18, fontWeight: "600", marginBottom: 12 }}>
+                    Editar {presupuestoEditar?.tipo === "recurrente"? presupuestoEditar?.nombre: presupuestoEditar?.categoria}
+                  </ThemedText>
+                  <TextInput
+                    placeholder="Nuevo valor"
+                    placeholderTextColor="#888"
+                    keyboardType="numeric"
+                    value={nuevoValorEditar}
+                    onChangeText={setNuevoValorEditar}
+                    style={{
+                      color: "#888",
+                      borderBottomColor: "#333",
+                      borderBottomWidth: 1,
+                      marginBottom: 16,
+                      paddingVertical: 4,
+                    }}
+                  />
+                  {presupuestoEditar?.tipo === "recurrente" && (
+                    <TextInput
+                      placeholder="Nueva dia (1-28)"
+                      placeholderTextColor="#888"
+                      keyboardType="numeric"
+                      value={nuevoValorEditarFecha}
+                      onChangeText={setNuevoValorEditarFecha}
+                      style={{
+                        color: "#888",
+                        borderBottomColor: "#333",
+                        borderBottomWidth: 1,
+                        marginBottom: 16,
+                        paddingVertical: 4,
+                      }}
+                    />
+                  )}
+                  <TouchableOpacity
+                    onPress={guardarEdicion}
+                    style={{
+                      backgroundColor: "#5c6bf2",
+                      borderRadius: 10,
+                      paddingVertical: 10,
+                      alignItems: "center",
+                      marginBottom: 10,
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setModalEditar(false)}>
+                    <Text style={{ color: "#aaa", textAlign: "center" }}>Cancelar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          </TouchableWithoutFeedback>
+        </Modal>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -1658,7 +1684,7 @@ const styles = {
     marginHorizontal: 5,
     borderRadius: 10,
     paddingVertical: 10,
-    alignItems: "center",
+    alignItems: "center" as const,
   },
   presupuestoBtn: {
     paddingHorizontal: 12,

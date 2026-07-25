@@ -12,6 +12,7 @@ const admin = require('firebase-admin');
 const functions = require('firebase-functions');
 const { google } = require('googleapis');
 const { onMessagePublished } = require('firebase-functions/v2/pubsub');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -1088,23 +1089,25 @@ exports.notifyPresupuestosPersonalizados = functions.scheduler
  * - Después de una compra exitosa
  * - En sincronización manual desde la app
  */
-exports.verifyPlaySubscription = functions.https.onCall(async (data, context) => {
-  const callerUid = context?.auth?.uid;
+// Change this:
+// exports.verifyPlaySubscription = functions.https.onCall(async (data, context) => { ... })
+
+// To this (v2 signature):
+exports.verifyPlaySubscription = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  const data = request.data;
+  
   const requestedUid = typeof data?.uid === 'string' ? data.uid : null;
   const purchaseToken = typeof data?.purchaseToken === 'string' ? data.purchaseToken : null;
   const packageName = typeof data?.packageName === 'string' ? data.packageName : null;
 
   if (!callerUid) {
-    throw new functions.https.HttpsError('unauthenticated', 'Debes iniciar sesión para verificar la suscripción.');
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para verificar la suscripción.');
   }
 
   const uid = requestedUid || callerUid;
   if (uid !== callerUid) {
-    throw new functions.https.HttpsError('permission-denied', 'No puedes verificar suscripciones de otro usuario.');
-  }
-
-  if (!purchaseToken) {
-    throw new functions.https.HttpsError('invalid-argument', 'purchaseToken es requerido.');
+    throw new HttpsError('permission-denied', 'No puedes verificar suscripciones de otro usuario.');
   }
 
   try {
@@ -1130,9 +1133,54 @@ exports.verifyPlaySubscription = functions.https.onCall(async (data, context) =>
       };
     }
 
-    throw new functions.https.HttpsError('internal', 'No se pudo verificar la suscripción en servidor.');
+    throw new HttpsError('internal', 'No se pudo verificar la suscripción en servidor.');
   }
 });
+
+exports.verifyPlaySubscription = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  const data = request.data;
+  
+  const requestedUid = typeof data?.uid === 'string' ? data.uid : null;
+  const purchaseToken = typeof data?.purchaseToken === 'string' ? data.purchaseToken : null;
+  const packageName = typeof data?.packageName === 'string' ? data.packageName : null;
+
+  if (!callerUid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para verificar la suscripción.');
+  }
+
+  const uid = requestedUid || callerUid;
+  if (uid !== callerUid) {
+    throw new HttpsError('permission-denied', 'No puedes verificar suscripciones de otro usuario.');
+  }
+
+  try {
+    return await verifyPlaySubscriptionAndPersist({ uid, purchaseToken, packageName });
+  } catch (error) {
+    console.error('verifyPlaySubscription error:', error);
+
+    // Token inválido o suscripción no encontrada en Play => marcar como inactiva.
+    if (error?.code === 404 || error?.response?.status === 404) {
+      await upsertSupportSubscription(uid, {
+        active: false,
+        pending: false,
+        packageName: packageName || KONTA_ANDROID_PACKAGE,
+        purchaseToken,
+        state: 'NOT_FOUND',
+        lastVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      return {
+        uid,
+        active: false,
+        state: 'NOT_FOUND',
+      };
+    }
+
+    throw new HttpsError('internal', 'No se pudo verificar la suscripción en servidor.');
+  }
+});
+
 
 /**
  * Fallback programado para revalidar suscripciones en servidor.

@@ -15,12 +15,17 @@ const firebaseConfig = {
   measurementId: "G-L51NFK5GX5"
 };
 
+// 1. Initialize the App
 const app = initializeApp(firebaseConfig);
+
+// 2. Initialize Auth FIRST so all subsequent services can link to it
+const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage)
+});
+
+// 3. Initialize the other services
 const db = getFirestore(app);
 const functions = getFunctions(app, 'us-central1');
-const auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage)
-  });
 const storage = getStorage(app);
 
 export { app, auth, db, functions, storage };

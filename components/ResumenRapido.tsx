@@ -7,10 +7,10 @@ import { useThemeColor } from "@/hooks/useThemeColor";
 import { Ionicons } from "@expo/vector-icons";
 import { endOfDay, endOfMonth, endOfWeek, startOfDay, startOfMonth, startOfWeek, subDays, subMonths, subWeeks } from "date-fns";
 import { collection, onSnapshot, query, Timestamp, where } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Dimensions, TouchableOpacity, View } from "react-native";
 import { LineChart } from "react-native-chart-kit";
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useSharedValue, withSequence, withTiming } from "react-native-reanimated";
 import { RFValue } from "react-native-responsive-fontsize";
 
 const screenWidth = Dimensions.get("window").width;
@@ -23,42 +23,24 @@ export default function ResumenRapido() {
   const [currentTotal, setCurrentTotal] = useState<number>(0); 
   const [previousTotal, setPreviousTotal] = useState<number>(0); 
   const [trendPoints, setTrendPoints] = useState<number[]>([]);
-  const [expanded, setExpanded] = useState(false);
 
   const cardsColor = useThemeColor({light:'',dark:''},'cardsMain');
   const textColor = useThemeColor({light:'',dark:''},'text');
   const resumenRapidoColor = useThemeColor({light:'',dark:''},'resumenRapido');
-  
-  const [actualizar, setActualizar] = useState(0);
 
   // animación (opcional, usa para resaltar cambio)
   const scale = useSharedValue(1);
   useEffect(() => {
-    // pequeño pulso cuando cambian los totales
-    scale.value = withTiming(1.03, { duration: 160 }, () => {
-      scale.value = withTiming(1, { duration: 200 });
-    });
-  }, [currentTotal, previousTotal]);
+    // Evita callbacks encadenados en UI thread que pueden recursar en Reanimated 4.
+    scale.value = withSequence(
+      withTiming(1.03, { duration: 160 }),
+      withTiming(1, { duration: 200 })
+    );
+  }, [currentTotal, previousTotal, scale]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
-
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    try {
-        const ref = collection(db, `users/${user.uid}/transacciones`);
-        const unsubscribe = onSnapshot(ref, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setActualizar(data.length);
-        });
-
-        return () => unsubscribe();
-    } catch (e) {
-        console.error("Error en useEffect de presupuestos:", e);
-    }
-    }, [user]);
 
   // calcula intervalos según range
   const computeRanges = () => {
@@ -195,7 +177,7 @@ export default function ResumenRapido() {
         setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, range, actualizar]);
+  }, [user, range]);
 
   // cálculo de porcentaje y mensaje
   const { percentChange, arrow, colorText, message } = useMemo(() => {
@@ -225,7 +207,7 @@ export default function ResumenRapido() {
         console.error("Error en useMemo de ResumenRapido:", e);
         return { percentChange: 0, arrow: "remove" as const, colorText: textColor, message: "" };
     }
-  }, [currentTotal, previousTotal, actualizar]);
+  }, [currentTotal, previousTotal, textColor]);
 
   // mini chart config (similar al BalanceHeader)
   const chartConfig = {
@@ -246,7 +228,7 @@ export default function ResumenRapido() {
       return trendPoints.map((_, i) => "");
     }
     return trendPoints.map(() => "");
-  }, [trendPoints, actualizar]);
+  }, [trendPoints]);
 
   try{
     return (

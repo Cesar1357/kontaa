@@ -44,8 +44,8 @@ import SaludFinancieraCard from '@/components/SaludFinancieraCard';
 
 
 const HOME_SECTIONS_DEFAULT: HomeSectionKey[] = [
-  'favorite-charts',
   'quick-access',
+  'favorite-charts',
   'weekly',
   'health',
   'upcoming',
@@ -892,6 +892,23 @@ export default function Inicio() {
   };
 
   const renderHomeSection = (section: HomeSectionKey) => {
+
+    if (section === 'quick-access') {
+      return (
+        <QuickAccessPanel
+          quickActions={preestablecidosRapidos}
+          quickAccessPromoDismissed={quickAccessPromoDismissed}
+          primaryColor={primaryColor}
+          borderColor={borderColor}
+          textColor={textColor}
+          onDismissPromo={dismissQuickAccessPromo}
+          onCreatePress={goToCreateQuickAccess}
+          onQuickPress={registrarDesdePreestablecido}
+          onQuickLongPress={openQuickInModal}
+        />
+      );
+    }
+
     if (section === 'favorite-charts') {
       if (favoriteCharts.length === 0) return null;
 
@@ -928,22 +945,6 @@ export default function Inicio() {
             />
           ))}
         </ThemedView>
-      );
-    }
-
-    if (section === 'quick-access') {
-      return (
-        <QuickAccessPanel
-          quickActions={preestablecidosRapidos}
-          quickAccessPromoDismissed={quickAccessPromoDismissed}
-          primaryColor={primaryColor}
-          borderColor={borderColor}
-          textColor={textColor}
-          onDismissPromo={dismissQuickAccessPromo}
-          onCreatePress={goToCreateQuickAccess}
-          onQuickPress={registrarDesdePreestablecido}
-          onQuickLongPress={openQuickInModal}
-        />
       );
     }
 

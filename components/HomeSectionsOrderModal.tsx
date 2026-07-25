@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
 import { Modal, ScrollView, Switch, TouchableOpacity, View } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
@@ -7,8 +6,8 @@ import { ThemedView } from '@/components/ThemedView';
 import { useThemeColor } from '@/hooks/useThemeColor';
 
 export type HomeSectionKey =
-  | 'favorite-charts'
   | 'quick-access'
+  | 'favorite-charts'
   | 'weekly'
   | 'health'
   | 'upcoming'
@@ -24,8 +23,8 @@ export interface HomeSectionConfig {
 }
 
 export const HOME_SECTIONS_CONFIG_DEFAULT: HomeSectionConfig[] = [
-  { key: 'favorite-charts', visible: true },
   { key: 'quick-access', visible: true },
+  { key: 'favorite-charts', visible: true },
   { key: 'weekly', visible: true },
   { key: 'health', visible: true },
   { key: 'upcoming', visible: true },

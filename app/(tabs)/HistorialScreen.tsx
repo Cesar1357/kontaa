@@ -2,8 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect } from 'expo-router/react-navigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Dimensions, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Switch, ToastAndroid, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
+import { Alert, BackHandler, Dimensions, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Switch, ToastAndroid, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 import Animated, { FadeInDown, FadeOutUp, Layout, useSharedValue, withTiming } from "react-native-reanimated";
 import { RFValue } from 'react-native-responsive-fontsize';
 import { db } from '../../config/firebase';
@@ -253,6 +254,26 @@ export default function HistorialScreen() {
 
     chartsBottomSheetRef.current?.dismiss();
   }, [isExpanded]);
+
+  useEffect(() => {
+    const backAction = () => {
+      if (!isExpanded) return false;
+      setIsExpanded(false);
+      return true;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [isExpanded]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        chartsBottomSheetRef.current?.dismiss();
+        setIsExpanded(false);
+      };
+    }, [])
+  );
 
   const total = transacciones.reduce(
     (acc, t) => acc + (t.tipo === "ingreso" ? t.monto : -t.monto),
@@ -782,7 +803,7 @@ export default function HistorialScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor }}>
+    <View style={{ flex: 1, backgroundColor:backgroundColor }}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{

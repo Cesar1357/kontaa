@@ -110,6 +110,8 @@ export default function Settings() {
   const pendingPurchaseAmountRef = useRef<number | null>(null);
   const purchaseFlowActiveRef = useRef(false);
   const processedPurchaseKeyRef = useRef<string | null>(null);
+  const purchaseFlowStartedAtRef = useRef<number>(0);
+  const purchaseSuccessRef = useRef(false);
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -247,12 +249,17 @@ export default function Settings() {
 
         const amount = pendingPurchaseAmountRef.current || Number(subscriptionData?.pendingAmount || subscriptionData?.amount || 0);
         const wasUserInitiated = purchaseFlowActiveRef.current;
+        purchaseSuccessRef.current = true;
         const verified = await verifySubscriptionOnServer(purchase.purchaseToken);
         const verifiedData = (verified as any)?.data || null;
         const verifiedActive = Boolean((verifiedData as any)?.active);
 
         if (!(verified as any)?.ok) {
           if (wasUserInitiated) {
+            modalRef.current?.dismiss();
+            setActiveModal(null);
+            setLastSubscribedAmount(amount || null);
+            setShowSubscriptionThanks(true);
             Alert.alert('Verificación pendiente', 'La compra se registró, pero no se pudo verificar en servidor ahora. Intenta "Sincronizar con Google Play" en unos segundos.');
           }
           pendingPurchaseAmountRef.current = null;
@@ -346,10 +353,20 @@ export default function Settings() {
     const errorSub = purchaseErrorListener((error) => {
       console.error('Play Billing purchase error:', error);
       const wasUserInitiated = purchaseFlowActiveRef.current;
+      const now = Date.now();
+      const code = (error as { code?: string }).code;
+
+      // En algunos dispositivos llega un error transitorio antes de que purchaseUpdatedListener termine.
+      const recentStart = now - purchaseFlowStartedAtRef.current < 4000;
+      if (wasUserInitiated && purchaseSuccessRef.current) {
+        return;
+      }
+
       purchaseFlowActiveRef.current = false;
       pendingPurchaseAmountRef.current = null;
       setProcessingSubscription(false);
-      if ((error as { code?: string }).code === 'E_USER_CANCELLED') return;
+      if (code === 'E_USER_CANCELLED') return;
+      if (wasUserInitiated && recentStart) return;
       if (!wasUserInitiated) return;
       Alert.alert('Compra no completada', 'No se pudo completar la suscripción en Google Play.');
     });
@@ -846,6 +863,8 @@ export default function Settings() {
     try {
       setProcessingSubscription(true);
       purchaseFlowActiveRef.current = true;
+      purchaseSuccessRef.current = false;
+      purchaseFlowStartedAtRef.current = Date.now();
       pendingPurchaseAmountRef.current = amount;
       await setDoc(
         doc(db, `users/${uid}`),

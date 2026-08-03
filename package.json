@@ -9,6 +9,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "update:preview": "powershell -ExecutionPolicy Bypass -File ./scripts/eas-update-preview.ps1",
+    "update:production": "powershell -ExecutionPolicy Bypass -File ./scripts/eas-update-production.ps1",
     "postinstall": "node ./scripts/fix-react-native-iap.js",
     "eas-build-post-install": "chmod +x node_modules/hermes-compiler/hermesc/linux64-bin/hermesc || true"
   },

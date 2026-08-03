@@ -1,9 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from "firebase/app";
-import { getReactNativePersistence, initializeAuth } from 'firebase/auth';
+import {
+    browserLocalPersistence,
+    getAuth,
+    getReactNativePersistence,
+    inMemoryPersistence,
+    initializeAuth,
+} from 'firebase/auth';
 import { getFirestore } from "firebase/firestore";
 import { getFunctions } from 'firebase/functions';
 import { getStorage } from "firebase/storage";
+import { Platform } from 'react-native';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC5u-H2DdIzrmt3UFGM_dxBBKTJG8ojrdk",
@@ -19,9 +26,24 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // 2. Initialize Auth FIRST so all subsequent services can link to it
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage)
-});
+const auth = (() => {
+  try {
+    if (Platform.OS === 'web') {
+      // Static rendering runs in Node (no window/localStorage), so use memory there.
+      const isServer = typeof window === 'undefined';
+      return initializeAuth(app, {
+        persistence: isServer ? inMemoryPersistence : browserLocalPersistence,
+      });
+    }
+
+    return initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    // Reuse existing auth instance during fast refresh/hot reload.
+    return getAuth(app);
+  }
+})();
 
 // 3. Initialize the other services
 const db = getFirestore(app);

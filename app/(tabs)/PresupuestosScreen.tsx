@@ -5,28 +5,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams } from 'expo-router';
 import {
-    Timestamp,
-    collection,
-    deleteDoc,
-    doc,
-    onSnapshot,
-    query,
-    setDoc,
-    updateDoc,
-    where,
+  Timestamp,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    NativeModules,
-    Platform,
-    Text,
-    ToastAndroid,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  NativeModules,
+  Platform,
+  Text,
+  ToastAndroid,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { ScrollView, TextInput } from "react-native-gesture-handler";
 import Animated, { Layout } from "react-native-reanimated";
@@ -938,7 +938,7 @@ export default function PresupuestosScreen() {
                 placeholder="Icono o emoji (ej. 💼)"
                 placeholderTextColor="#888"
                 value={nuevoMainIcono}
-                maxLength={1}
+                maxLength={2}
                 onChangeText={setNuevoMainIcono}
                 style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 12, paddingVertical: 4 }}
               />
@@ -1058,7 +1058,7 @@ export default function PresupuestosScreen() {
                         placeholder="Icono o emoji (ej. ⚡)"
                         placeholderTextColor="#888"
                         value={nuevoSubIcono}
-                        maxLength={1}
+                        maxLength={2}
                         onChangeText={setNuevoSubIcono}
                         style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
                       />

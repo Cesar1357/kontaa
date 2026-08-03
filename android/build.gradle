@@ -13,6 +13,11 @@ buildscript {
   }
 }
 
+ext {
+  // Force a valid local NDK to avoid picking a broken installation.
+  ndkVersion = "27.1.12297006"
+}
+
 def reactNativeAndroidDir = new File(
   providers.exec {
     workingDir(rootDir)

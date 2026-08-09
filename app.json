@@ -2,7 +2,7 @@
   "expo": {
     "name": "Konta",
     "slug": "Konta",
-    "version": "3.0.0",
+    "version": "3.0.5",
     "description": "Konta es una app moderna para administrar tus finanzas personales con claridad. Registra ingresos, egresos y ahorros, crea presupuestos y metas, revisa tu progreso en tiempo real y recibe alertas útiles para mantener el control de tu dinero.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -22,7 +22,7 @@
       "package": "com.cesar1357.konta",
       "googleServicesFile": "./google-services.json",
       "permissions": [],
-      "runtimeVersion": "3.0.0"
+      "runtimeVersion": "3.0.5"
     },
     "web": {
       "bundler": "metro",

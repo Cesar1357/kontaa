@@ -18,7 +18,7 @@ import {
   Timestamp,
   updateDoc
 } from "firebase/firestore";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -95,6 +95,12 @@ export default function AhorrosScreen() {
   const cardsMain = useThemeColor({ light: '', dark: '' }, 'cardsMain');
   const cardMain = useThemeColor({ light: '', dark: '' }, 'cardMain');
   const progressBg = useThemeColor({ light: '', dark: '' }, 'progressBg');
+  const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
+  const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
+  const primaryDarkColor = useThemeColor({ light: '', dark: '' }, 'primaryDark');
+  const modalOverlayColor = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
+  const iconColor = useThemeColor({ light: '', dark: '' }, 'icon');
+  const headerColors: [string, string] = [primaryColor, primaryDarkColor || primaryColor];
 
   const styles = StyleSheet.create({
   headerCard: {
@@ -102,7 +108,7 @@ export default function AhorrosScreen() {
     borderRadius: 20,
   },
   headerTitle: { color: "white", fontSize: RFValue(20), fontWeight: "700" },
-  headerSubtitle: { color: "#e6e6e6", marginTop: 6 },
+  headerSubtitle: { color: "rgba(255,255,255,0.88)", marginTop: 6 },
 
   emptyContainer: {
     padding: 18,
@@ -117,8 +123,8 @@ export default function AhorrosScreen() {
     marginBottom: 12,
   },
   cardTitle: { fontSize: RFValue(16), fontWeight: "700" },
-  cardDesc: { color: "#aaa", marginTop: 4 },
-  cardSmall: { color: "#999", marginTop: 6 },
+  cardDesc: { color: textColor, marginTop: 4, opacity: 0.7 },
+  cardSmall: { color: textColor, marginTop: 6, opacity: 0.65 },
 
   progressBg: {
     height: 8,
@@ -128,12 +134,12 @@ export default function AhorrosScreen() {
   },
   progressFg: {
     height: "100%",
-    backgroundColor: "#5c6bf2",
+    backgroundColor: primaryColor,
     borderRadius: 10,
   },
 
   iconBtn: {
-    backgroundColor: progressBg,
+    backgroundColor: cardsMain,
     width: 36,
     height: 36,
     borderRadius: 8,
@@ -154,12 +160,14 @@ export default function AhorrosScreen() {
   },
 
   input: {
-    backgroundColor: "#1b1b1b",
+    backgroundColor: cardsMain,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 10,
-    color:"#999"
+    color: textColor,
+    borderWidth: 1,
+    borderColor: borderColor,
   },
 
   btn: {
@@ -191,10 +199,12 @@ export default function AhorrosScreen() {
     color: textColor,
   },
   movCard: {
-    backgroundColor: "#222",
+    backgroundColor: cardsMain,
     padding: 10,
     borderRadius: 10,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: borderColor,
   },
 });
 
@@ -555,7 +565,7 @@ export default function AhorrosScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 80 }}>
         <Animated.View layout={Layout.springify()}>
           <LinearGradient
-            colors={["#6366f1", "#8b5cf6"]}
+            colors={headerColors}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.headerCard}
@@ -573,7 +583,7 @@ export default function AhorrosScreen() {
         <Animated.View layout={Layout.springify()}>
           {ahorros.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={{ color: "#aaa" }}>No hay metas todavía. Crea una.</Text>
+              <Text style={{ color: textColor, opacity: 0.7 }}>No hay metas todavía. Crea una.</Text>
             </View>
           ) : (
             ahorros.map((a) => {
@@ -597,14 +607,14 @@ export default function AhorrosScreen() {
 
                     <View style={{ marginLeft: 10, alignItems: "flex-end" }}>
                       <TouchableOpacity onPress={() => abrirDetalle(a)} style={styles.iconBtn}>
-                        <Ionicons name="chevron-forward" size={20} color="white" />
+                        <Ionicons name="chevron-forward" size={20} color={iconColor} />
                       </TouchableOpacity>
                       <View style={{ height: 8 }} />
-                      <TouchableOpacity onPress={() => editarMeta(a)} style={[styles.iconBtn, { backgroundColor: "#5c6bf2" }]}>
+                      <TouchableOpacity onPress={() => editarMeta(a)} style={[styles.iconBtn, { backgroundColor: primaryColor }]}>
                         <Ionicons name="create-outline" size={18} color="white" />
                       </TouchableOpacity>
                       <View style={{ height: 8 }} />
-                      <TouchableOpacity onPress={() => confirmarEliminar(a)} style={[styles.iconBtn, { backgroundColor: "#ff6363" }]}>
+                      <TouchableOpacity onPress={() => confirmarEliminar(a)} style={[styles.iconBtn, { backgroundColor: "#ef4444" }]}>
                         <Ionicons name="trash-outline" size={18} color="white" />
                       </TouchableOpacity>
                     </View>
@@ -632,7 +642,7 @@ export default function AhorrosScreen() {
           position: "absolute",
           bottom: 30,
           right: 20,
-          backgroundColor: "#5c6bf2",
+          backgroundColor: primaryColor,
           width: 56,
           height: 56,
           borderRadius: 28,
@@ -641,7 +651,7 @@ export default function AhorrosScreen() {
           elevation: 8,
         }}
       >
-        <Ionicons name="add" size={30} color="white" />
+        <Ionicons name="add" size={30} color={iconColor} />
       </TouchableOpacity>
 
        <Modal visible={showTransacciones} transparent animationType="fade">
@@ -659,20 +669,21 @@ export default function AhorrosScreen() {
                   Movimientos de {selected?.nombre || ""}
                 </ThemedText>
                 <TouchableOpacity onPress={() => setShowTransacciones(false)}>
-                  <Ionicons name="close" size={24} color="#fff" />
+                  <Ionicons name="close" size={24} color={iconColor} />
                 </TouchableOpacity>
               </View>
 
               {cargandoMovimientos ? (
                 <ActivityIndicator
                   size="large"
-                  color="#5c6bf2"
+                  color={primaryColor}
                   style={{ marginTop: 20 }}
                 />
               ) : transaccionesData.length === 0 ? (
                 <Text
                   style={{
-                    color: "#aaa",
+                    color: textColor,
+                    opacity: 0.7,
                     textAlign: "center",
                     marginTop: 30,
                   }}
@@ -694,11 +705,11 @@ export default function AhorrosScreen() {
                       >
                         {item.tipo === "deposito" || item.tipo === "transferencia" ? "+" : "-"}${item.monto.toFixed(2)}
                       </ThemedText>
-                      <Text style={{ color: "#aaa", fontSize: 12 }}>
+                      <Text style={{ color: textColor, fontSize: 12, opacity: 0.75 }}>
                         {item.nota || "Sin descripción"}
                       </Text>
                       {item.creado?.seconds ? (
-                        <Text style={{ color: "#666", fontSize: 11, marginTop: 2 }}>
+                        <Text style={{ color: textColor, fontSize: 11, marginTop: 2, opacity: 0.55 }}>
                           {new Date(
                             item.creado.seconds * 1000
                           ).toLocaleDateString()}
@@ -724,7 +735,7 @@ export default function AhorrosScreen() {
               <TextInput
                 ref={nombreInputRef}
                 placeholder="Nombre"
-                placeholderTextColor="#999"
+                placeholderTextColor={textColor}
                 value={nombre}
                 onChangeText={setNombre}
                 style={styles.input}
@@ -732,7 +743,7 @@ export default function AhorrosScreen() {
 
               <TextInput
                 placeholder="Meta (MXN) (opcional)"
-                placeholderTextColor="#999"
+                placeholderTextColor={textColor}
                 keyboardType="numeric"
                 value={meta}
                 onChangeText={setMeta}
@@ -741,7 +752,7 @@ export default function AhorrosScreen() {
 
               <TextInput
                 placeholder="Descripción (opcional)"
-                placeholderTextColor="#999"
+                placeholderTextColor={textColor}
                 value={descripcion}
                 onChangeText={setDescripcion}
                 style={styles.input}
@@ -766,11 +777,11 @@ export default function AhorrosScreen() {
                     paddingVertical: 6,
                     borderRadius: 999,
                     borderWidth: 1,
-                    borderColor: sinPlazo ? "#5c6bf2" : "#3a3a3a",
-                    backgroundColor: sinPlazo ? "#5c6bf2" : "#2a2a2a",
+                    borderColor: sinPlazo ? primaryColor : borderColor,
+                    backgroundColor: sinPlazo ? primaryColor : cardsMain,
                   }}
                 >
-                  <Text style={{ color: "white", fontSize: 12, fontWeight: "600" }}>Sin plazo</Text>
+                  <Text style={{ color: iconColor, fontSize: 12, fontWeight: "600" }}>Sin plazo</Text>
                 </TouchableOpacity>
               </View>
               <View style={{ flexDirection: "row", marginBottom: 10, justifyContent: "center" }}>
@@ -781,10 +792,10 @@ export default function AhorrosScreen() {
                   }}
                   style={[
                     styles.smallBtn,
-                    plazo === "corto" ? { backgroundColor: "#3edc81" } : { backgroundColor: "#2a2a2a" },
+                    plazo === "corto" ? { backgroundColor: "#3edc81" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: plazo === "corto" ? "black" : "white" }}>Corto (1 mes)</Text>
+                  <Text style={{ color: plazo === "corto" ? "black" : iconColor }}>Corto (1 mes)</Text>
                 </TouchableOpacity>
 
                 <View style={{ width: 8 }} />
@@ -796,10 +807,10 @@ export default function AhorrosScreen() {
                   }}
                   style={[
                     styles.smallBtn,
-                    plazo === "mediano" ? { backgroundColor: "#93c5fd" } : { backgroundColor: "#2a2a2a" },
+                    plazo === "mediano" ? { backgroundColor: "#93c5fd" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: plazo === "mediano" ? "black" : "white" }}>Mediano (1 año)</Text>
+                  <Text style={{ color: plazo === "mediano" ? "black" : iconColor }}>Mediano (1 año)</Text>
                 </TouchableOpacity>
 
                 <View style={{ width: 8 }} />
@@ -811,10 +822,10 @@ export default function AhorrosScreen() {
                   }}
                   style={[
                     styles.smallBtn,
-                    plazo === "largo" ? { backgroundColor: "#c084fc" } : { backgroundColor: "#2a2a2a" },
+                    plazo === "largo" ? { backgroundColor: "#c084fc" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: plazo === "largo" ? "black" : "white" }}>Largo (2 años)</Text>
+                  <Text style={{ color: plazo === "largo" ? "black" : iconColor }}>Largo (2 años)</Text>
                 </TouchableOpacity>
               </View>
 
@@ -831,10 +842,10 @@ export default function AhorrosScreen() {
                   },
                 ]}
               >
-                <Text style={{ color: fechaLimite ? "white" : "#999" }}>
+                <Text style={{ color: fechaLimite ? iconColor : textColor, opacity: fechaLimite ? 1 : 0.65 }}>
                   {sinPlazo ? "Sin plazo seleccionado" : (fechaLimite || "Fecha probable (opcional)")}
                 </Text>
-                <Ionicons name="calendar-outline" size={18} color="#999" />
+                <Ionicons name="calendar-outline" size={18} color={textColor} />
               </TouchableOpacity>
 
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
@@ -852,16 +863,16 @@ export default function AhorrosScreen() {
                     setCantidadActual(0);
                     setSelected(null);
                   }}
-                  style={[styles.btn, { backgroundColor: "#2a2a2a", flex: 1 }]}
+                  style={[styles.btn, { backgroundColor: cardsMain, flex: 1, borderWidth: 1, borderColor: borderColor }]}
                 >
-                  <Text style={{ color: "white", textAlign: "center" }}>Cancelar</Text>
+                  <Text style={{ color: iconColor, textAlign: "center" }}>Cancelar</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   onPress={guardarNuevo}
-                  style={[styles.btn, { backgroundColor: "#5c6bf2", flex: 1 }]}
+                  style={[styles.btn, { backgroundColor: primaryColor, flex: 1 }]}
                 >
-                  <Text style={{ color: "white", textAlign: "center" }}>Guardar</Text>
+                  <Text style={{ color: iconColor, textAlign: "center" }}>Guardar</Text>
                 </TouchableOpacity>
               </View>
             </KeyboardAvoidingView>
@@ -886,7 +897,7 @@ export default function AhorrosScreen() {
                 {selected?.nombre || "Detalle"}
               </ThemedText>
 
-              <ThemedText style={{ color: "#aaa", marginBottom: 6 }}>
+              <ThemedText style={{ color: textColor, opacity: 0.7, marginBottom: 6 }}>
                 Actual: ${fmt(selected?.cantidadActual || 0)} • Meta: ${fmt(selected?.meta || 0)}
               </ThemedText>
 
@@ -895,10 +906,10 @@ export default function AhorrosScreen() {
                   onPress={() => setMovimientoTipo("deposito")}
                   style={[
                     styles.smallBtn,
-                    movimientoTipo === "deposito" ? { backgroundColor: "#3edc81" } : { backgroundColor: "#2a2a2a" },
+                    movimientoTipo === "deposito" ? { backgroundColor: "#3edc81" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: movimientoTipo === "deposito" ? "black" : "white" }}>Depositar</Text>
+                  <Text style={{ color: movimientoTipo === "deposito" ? "black" : iconColor }}>Depositar</Text>
                 </TouchableOpacity>
 
                 <View style={{ width: 8 }} />
@@ -907,10 +918,10 @@ export default function AhorrosScreen() {
                   onPress={() => setMovimientoTipo("retiro")}
                   style={[
                     styles.smallBtn,
-                    movimientoTipo === "retiro" ? { backgroundColor: "#ff8b8b" } : { backgroundColor: "#2a2a2a" },
+                    movimientoTipo === "retiro" ? { backgroundColor: "#ff8b8b" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: movimientoTipo === "retiro" ? "black" : "white" }}>Retirar</Text>
+                  <Text style={{ color: movimientoTipo === "retiro" ? "black" : iconColor }}>Retirar</Text>
                 </TouchableOpacity>
 
                 <View style={{ width: 8 }} />
@@ -919,10 +930,10 @@ export default function AhorrosScreen() {
                   onPress={() => setMovimientoTipo("transferencia")}
                   style={[
                     styles.smallBtn,
-                    movimientoTipo === "transferencia" ? { backgroundColor: "#c084fc" } : { backgroundColor: "#2a2a2a" },
+                    movimientoTipo === "transferencia" ? { backgroundColor: "#c084fc" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: movimientoTipo === "transferencia" ? "black" : "white" }}>A ahorro</Text>
+                  <Text style={{ color: movimientoTipo === "transferencia" ? "black" : iconColor }}>A ahorro</Text>
                 </TouchableOpacity>
               </View>
 
@@ -932,10 +943,10 @@ export default function AhorrosScreen() {
                   style={[
                     styles.smallBtn,
                     { width: "100%" },
-                    movimientoTipo === "pasarATransacciones" ? { backgroundColor: "#f59e0b" } : { backgroundColor: "#2a2a2a" },
+                    movimientoTipo === "pasarATransacciones" ? { backgroundColor: "#f59e0b" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: movimientoTipo === "pasarATransacciones" ? "black" : "white", textAlign: "center" }}>
+                  <Text style={{ color: movimientoTipo === "pasarATransacciones" ? "black" : iconColor, textAlign: "center" }}>
                     A transacciones
                   </Text>
                 </TouchableOpacity>
@@ -944,7 +955,7 @@ export default function AhorrosScreen() {
               <TextInput
                 ref={movimientoInputRef}
                 placeholder="Monto"
-                placeholderTextColor="#999"
+                placeholderTextColor={textColor}
                 keyboardType="numeric"
                 value={movimientoMonto}
                 onChangeText={setMovimientoMonto}
@@ -952,12 +963,12 @@ export default function AhorrosScreen() {
               />
 
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                <TouchableOpacity onPress={() => { setShowDetalle(false); setEditando(false); setSelected(null); }} style={[styles.btn, { backgroundColor: "#2a2a2a", flex: 1 }]}>
-                  <Text style={{ color: "white", textAlign: "center" }}>Cerrar</Text>
+                <TouchableOpacity onPress={() => { setShowDetalle(false); setEditando(false); setSelected(null); }} style={[styles.btn, { backgroundColor: cardsMain, flex: 1, borderWidth: 1, borderColor: borderColor }]}>
+                  <Text style={{ color: iconColor, textAlign: "center" }}>Cerrar</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={ejecutarMovimiento} style={[styles.btn, { backgroundColor: "#5c6bf2", flex: 1 }]}>
-                  <Text style={{ color: "white", textAlign: "center" }}>
+                <TouchableOpacity onPress={ejecutarMovimiento} style={[styles.btn, { backgroundColor: primaryColor, flex: 1 }]}>
+                  <Text style={{ color: iconColor, textAlign: "center" }}>
                     {movimientoTipo === "deposito"
                       ? "Depositar"
                       : movimientoTipo === "retiro"

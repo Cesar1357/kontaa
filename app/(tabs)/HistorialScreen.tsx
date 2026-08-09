@@ -4,11 +4,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useFocusEffect } from 'expo-router/react-navigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, BackHandler, Dimensions, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Switch, ToastAndroid, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
+import { Alert, BackHandler, Dimensions, FlatList, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Switch, ToastAndroid, TouchableOpacity, View } from "react-native";
 import Animated, { FadeInDown, FadeOutUp, Layout, useSharedValue, withTiming } from "react-native-reanimated";
 import { RFValue } from 'react-native-responsive-fontsize';
 import { db } from '../../config/firebase';
-
+  
 import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from "@/hooks/useThemeColor";
@@ -80,6 +80,7 @@ export default function HistorialScreen() {
   const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
   const primaryDarkColor = useThemeColor({ light: '', dark: '' }, 'primaryDark');
+  const headerColors: [string, string] = [primaryColor, primaryDarkColor || primaryColor];
 
   const [filtered, setFiltered] = useState<any[]>([]);
   const [filteredChart, setFilteredChart] = useState<any[]>([]);
@@ -815,7 +816,7 @@ export default function HistorialScreen() {
       {/* ENCABEZADO */}
       <Animated.View entering={FadeInDown.delay(100)} exiting={FadeOutUp}>
         <LinearGradient
-          colors={["#6366f1", "#8b5cf6"]}
+          colors={headerColors}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={{
@@ -885,7 +886,7 @@ export default function HistorialScreen() {
                   marginBottom: 8,
                 }}
               >
-                <ThemedText style={{ color: range === f.key && !startDate ? '#fff' : '#000000', fontSize: RFValue(12), textTransform: 'capitalize' }}>
+                <ThemedText style={{ color: range === f.key && !startDate ? '#fff' : '#9ca3af', fontSize: RFValue(12), textTransform: 'capitalize' }}>
                   {f.label}
                 </ThemedText>
               </TouchableOpacity>
@@ -950,7 +951,7 @@ export default function HistorialScreen() {
                       compact
                       mode="flat"
                       onPress={() => toggleSelection(opcion, selectedTipos, setSelectedTipos)}
-                      textStyle={{ color: selectedTipos.includes(opcion) ? '#ffffff' : '#000000' }}
+                      textStyle={{ color: selectedTipos.includes(opcion) ? '#ffffff' : '#9ca3af' }}
                       style={{
                         margin: 4,
                         alignSelf: 'flex-start',
@@ -974,7 +975,7 @@ export default function HistorialScreen() {
                         compact
                         mode="flat"
                         onPress={() => toggleSelection(opcion, selectedCategorias, setSelectedCategorias)}
-                        textStyle={{ color: selectedCategorias.includes(opcion) ? '#ffffff' : '#000000' }}
+                        textStyle={{ color: selectedCategorias.includes(opcion) ? '#ffffff' : '#9ca3af' }}
                         style={{
                           margin: 4,
                           alignSelf: 'flex-start',
@@ -999,11 +1000,11 @@ export default function HistorialScreen() {
                         compact
                         mode="flat"
                         onPress={() => toggleSelection(opcion, selectedPreestablecidos, setSelectedPreestablecidos)}
-                        textStyle={{ color: selectedPreestablecidos.includes(opcion) ? '#a5f3fc' : '#d1d5db' }}
+                        textStyle={{ color: selectedPreestablecidos.includes(opcion) ? '#ffffff' : '#9ca3af' }}
                         style={{
                           margin: 4,
                           alignSelf: 'flex-start',
-                          backgroundColor: selectedPreestablecidos.includes(opcion) ? 'rgba(8,145,178,0.35)' : '#353535',
+                          backgroundColor: selectedPreestablecidos.includes(opcion) ? 'rgba(8,145,178,0.35)' : progressBg,
                         }}
                       >
                         {opcion}
@@ -1105,16 +1106,17 @@ export default function HistorialScreen() {
                 onLongPress={() => handleDeleteTransaction(tx)}
                 style={{
                   flexDirection: "row",
-                  justifyContent: "space-between",
                   alignItems: "center",
                   paddingVertical: 10,
                   borderBottomWidth: 1,
                   borderColor: "rgba(255,255,255,0.08)",
+                  width: '100%',
+                  justifyContent: 'space-between',
                 }}
               >
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", maxWidth: 250 }}>
                   <View style={{}}>
-                    <View style={{flexDirection:"row", flexWrap: 'wrap'}}>
+                    <View style={{flexDirection:"row", flexWrap: 'wrap', alignItems: 'center'}}>
                       <ThemedText allowFontScaling textBreakStrategy="simple" numberOfLines={2} style={{ fontWeight: "500", maxWidth: 185}}>
                         {tx.descripcion || "Sin descripción"} 
                       </ThemedText>
@@ -1142,6 +1144,7 @@ export default function HistorialScreen() {
 
                 <ThemedText
                   style={{
+                    textAlign: "right",
                     color: tx.tipo === "ingreso" ? "#4ade80" : "#f87171",
                     fontWeight: "600",
                   }}
@@ -1620,78 +1623,88 @@ export default function HistorialScreen() {
         </View>
       </BottomSheetModal>
 
+
       <Modal visible={showChartOrderModal && Boolean(subscriptionActive)} transparent animationType="fade" onRequestClose={() => setShowChartOrderModal(false)}>
-        <TouchableWithoutFeedback onPress={() => setShowChartOrderModal(false)}>
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)' }}>
-            <TouchableWithoutFeedback>
-              <View style={{ width: '88%', borderRadius: 16, padding: 16, backgroundColor: cardsMain }}>
-                <ThemedText style={{ fontSize: 18, fontWeight: '700', marginBottom: 4 }}>Personalizar gráficas</ThemedText>
-                <ThemedText style={{ fontSize: 12, color: iconColor, marginBottom: 12 }}>
-                  Usa flechas para reordenar y el switch para mostrar u ocultar cada gráfica.
-                </ThemedText>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setShowChartOrderModal(false)}
+            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.45)' }}
+          />
 
-                {chartCardsConfig.map((item, index) => (
-                  <View
-                    key={item.key}
-                    style={{
-                      backgroundColor: `${primaryColor}14`,
-                      borderWidth: 1,
-                      borderColor: `${primaryColor}40`,
-                      borderRadius: 12,
-                      paddingVertical: 10,
-                      paddingHorizontal: 12,
-                      marginBottom: 8,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <ThemedText style={{ fontWeight: '700', fontSize: 13, flex: 1 }}>
-                      {HISTORIAL_CHART_META[item.key].title}
-                    </ThemedText>
+          <View style={{ width: '88%', maxHeight: '80%', borderRadius: 16, padding: 16, backgroundColor: cardsMain, zIndex: 2, elevation: 6 }}>
+            <ThemedText style={{ fontSize: 18, fontWeight: '700', marginBottom: 4 }}>Personalizar gráficas</ThemedText>
+            <ThemedText style={{ fontSize: 12, color: iconColor, marginBottom: 12 }}>
+              Usa flechas para reordenar y el switch para mostrar u ocultar cada gráfica.
+            </ThemedText>
 
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Switch
-                        value={item.visible}
-                        onValueChange={(value) => toggleChartVisibility(item.key, value)}
-                        trackColor={{ false: '#6b7280', true: `${primaryColor}88` }}
-                        thumbColor={item.visible ? primaryColor : '#f3f4f6'}
-                      />
-                      <TouchableOpacity
-                        onPress={() => moveChartUp(index)}
-                        disabled={index === 0}
-                        style={{ padding: 4, opacity: index === 0 ? 0.3 : 1 }}
-                      >
-                        <Ionicons name="arrow-up" size={18} color={textColor} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => moveChartDown(index)}
-                        disabled={index === chartCardsConfig.length - 1}
-                        style={{ padding: 4, opacity: index === chartCardsConfig.length - 1 ? 0.3 : 1 }}
-                      >
-                        <Ionicons name="arrow-down" size={18} color={textColor} />
-                      </TouchableOpacity>
-                    </View>
+            <FlatList
+              data={chartCardsConfig}
+              keyExtractor={(item) => item.key}
+              nestedScrollEnabled
+              style={{ flexGrow: 0, maxHeight: 420, marginBottom: 12 }}
+              contentContainerStyle={{ paddingBottom: 4 }}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item, index }) => (
+                <View
+                  style={{
+                    backgroundColor: `${primaryColor}14`,
+                    borderWidth: 1,
+                    borderColor: `${primaryColor}40`,
+                    borderRadius: 12,
+                    paddingVertical: 10,
+                    paddingHorizontal: 12,
+                    marginBottom: 8,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <ThemedText style={{ fontWeight: '700', fontSize: 13, flex: 1 }}>
+                    {HISTORIAL_CHART_META[item.key].title}
+                  </ThemedText>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Switch
+                      value={item.visible}
+                      onValueChange={(value) => toggleChartVisibility(item.key, value)}
+                      trackColor={{ false: '#6b7280', true: `${primaryColor}88` }}
+                      thumbColor={item.visible ? primaryColor : '#f3f4f6'}
+                    />
+                    <TouchableOpacity
+                      onPress={() => moveChartUp(index)}
+                      disabled={index === 0}
+                      style={{ padding: 4, opacity: index === 0 ? 0.3 : 1 }}
+                    >
+                      <Ionicons name="arrow-up" size={18} color={textColor} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => moveChartDown(index)}
+                      disabled={index === chartCardsConfig.length - 1}
+                      style={{ padding: 4, opacity: index === chartCardsConfig.length - 1 ? 0.3 : 1 }}
+                    >
+                      <Ionicons name="arrow-down" size={18} color={textColor} />
+                    </TouchableOpacity>
                   </View>
-                ))}
+                </View>
+              )}
+            />
 
-                <TouchableOpacity
-                  onPress={() => setChartCardsConfig(HISTORIAL_CHART_CONFIG_DEFAULT)}
-                  style={{ marginTop: 6, marginBottom: 8, paddingVertical: 10, justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: `${primaryColor}50` }}
-                >
-                  <ThemedText style={{ fontSize: 12, color: primaryColor, textAlign: 'center' }}>Restablecer orden por defecto</ThemedText>
-                </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setChartCardsConfig(HISTORIAL_CHART_CONFIG_DEFAULT)}
+              style={{ marginTop: 6, marginBottom: 8, paddingVertical: 10, justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: `${primaryColor}50` }}
+            >
+              <ThemedText style={{ fontSize: 12, color: primaryColor, textAlign: 'center' }}>Restablecer orden por defecto</ThemedText>
+            </TouchableOpacity>
 
-                <TouchableOpacity
-                  onPress={() => setShowChartOrderModal(false)}
-                  style={{ backgroundColor: primaryColor, borderRadius: 10, paddingVertical: 10, alignItems: 'center' }}
-                >
-                  <ThemedText style={{ color: '#fff', fontWeight: '700' }}>Listo</ThemedText>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
+            <TouchableOpacity
+              onPress={() => setShowChartOrderModal(false)}
+              style={{ backgroundColor: primaryColor, borderRadius: 10, paddingVertical: 10, alignItems: 'center' }}
+            >
+              <ThemedText style={{ color: '#fff', fontWeight: '700' }}>Listo</ThemedText>
+            </TouchableOpacity>
           </View>
-        </TouchableWithoutFeedback>
+        </View>
       </Modal>
 
     </View>

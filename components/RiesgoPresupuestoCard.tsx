@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, doc, getDoc, getDocs, query, Timestamp, where } from 'firebase/firestore';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 export default function RiesgoPresupuestoCard() {
@@ -16,7 +16,8 @@ export default function RiesgoPresupuestoCard() {
   const [loading, setLoading] = useState(true);
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [monthlySpent, setMonthlySpent] = useState(0);
-  const [monthlyRecurringSpent, setMonthlyRecurringSpent] = useState(0);
+  const [monthlyRecurringActualSpent, setMonthlyRecurringActualSpent] = useState(0);
+  const [monthlyRecurringPendingSpent, setMonthlyRecurringPendingSpent] = useState(0);
 
   const toMonthlyAmount = (item: any) => {
     const amount = Number(item?.monto || 0);
@@ -48,17 +49,25 @@ export default function RiesgoPresupuestoCard() {
         );
 
         const snap = await getDocs(q);
-        const spent = snap.docs.reduce((acc, d) => acc + Number((d.data() as any)?.monto || 0), 0);
+        const currentMonthTransactions = snap.docs.map((d) => d.data() as any);
+        const normalSpent = currentMonthTransactions
+          .filter((item) => !item?.recurrenteId)
+          .reduce((acc, item) => acc + Number(item?.monto || 0), 0);
+
+        const recurringActualSpent = currentMonthTransactions
+          .filter((item) => item?.recurrenteId)
+          .reduce((acc, item) => acc + Number(item?.monto || 0), 0);
 
         const recurrentesSnap = await getDocs(collection(db, `users/${userId}/gastosRecurrentes`));
-        const recurrentesMensuales = recurrentesSnap.docs
-          .map((d) => d.data() as any)
-          .filter((item) => item?.activo !== false)
+        const recurrentesPendientes = recurrentesSnap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as any) }))
+          .filter((item) => item?.activo !== false && !currentMonthTransactions.some((tx) => tx?.recurrenteId === item?.id))
           .reduce((acc, item) => acc + toMonthlyAmount(item), 0);
 
         setMonthlyBudget(presupuestoMes);
-        setMonthlySpent(spent);
-        setMonthlyRecurringSpent(recurrentesMensuales);
+        setMonthlySpent(normalSpent);
+        setMonthlyRecurringActualSpent(recurringActualSpent);
+        setMonthlyRecurringPendingSpent(recurrentesPendientes);
       } catch (error) {
         console.log('No se pudo calcular riesgo de presupuesto:', error);
       } finally {
@@ -74,7 +83,7 @@ export default function RiesgoPresupuestoCard() {
     const daysPassed = Math.max(1, now.getDate());
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const projectedByTransactions = (monthlySpent / daysPassed) * daysInMonth;
-    const projected = projectedByTransactions + monthlyRecurringSpent;
+    const projected = projectedByTransactions + monthlyRecurringActualSpent + monthlyRecurringPendingSpent;
 
     let status = 'Sin presupuesto mensual';
     let color = '#94a3b8';
@@ -94,7 +103,7 @@ export default function RiesgoPresupuestoCard() {
     }
 
     return { projected, projectedByTransactions, status, color };
-  }, [monthlyBudget, monthlySpent, monthlyRecurringSpent]);
+  }, [monthlyBudget, monthlySpent, monthlyRecurringActualSpent, monthlyRecurringPendingSpent]);
 
   return (
     <ThemedView
@@ -112,9 +121,9 @@ export default function RiesgoPresupuestoCard() {
         elevation: 5,
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8}}>
         <Ionicons name="alert-circle-outline" size={18} color={projection.color} />
-        <ThemedText style={{ marginLeft: 8, fontSize: 15, fontWeight: '700' }}>Riesgo de presupuesto</ThemedText>
+        <ThemedText style={{ marginLeft: 8, fontSize: 15 }}>Riesgo de presupuesto</ThemedText>
       </View>
 
       {loading ? (
@@ -125,7 +134,7 @@ export default function RiesgoPresupuestoCard() {
             Proyección al cierre del mes: ${projection.projected.toFixed(0)} / ${monthlyBudget.toFixed(0)}
           </ThemedText>
           <ThemedText style={{ fontSize: 11, opacity: 0.72, marginBottom: 8 }}>
-            Incluye ${projection.projectedByTransactions.toFixed(0)} por transacciones y ${monthlyRecurringSpent.toFixed(0)} por gastos recurrentes.
+            Incluye ${projection.projectedByTransactions.toFixed(0)} por transacciones normales, ${monthlyRecurringActualSpent.toFixed(0)} por recurrentes ya cobrados y ${monthlyRecurringPendingSpent.toFixed(0)} por recurrentes pendientes.
           </ThemedText>
           <ThemedText style={{ fontSize: 12, fontWeight: '700', color: projection.color }}>{projection.status}</ThemedText>
         </>

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Modal, ScrollView, Switch, TouchableOpacity, View } from 'react-native';
+import { FlatList, Modal, Switch, TouchableOpacity, View } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -94,63 +94,63 @@ export default function HomeSectionsOrderModal({
           style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.45)' }}
         />
 
-        <ThemedView style={{ width: '88%', maxHeight: '80%', borderRadius: 16, padding: 16, backgroundColor: cardsMain }}>
+        <ThemedView style={{ width: '88%', maxHeight: '80%', borderRadius: 16, padding: 16, backgroundColor: cardsMain, zIndex: 2, elevation: 6 }}>
               <ThemedText style={{ fontSize: 18, fontWeight: '700', marginBottom: 4 }}>Personalizar inicio</ThemedText>
               <ThemedText style={{ fontSize: 12, opacity: 0.8, marginBottom: 12 }}>
                 Usa las flechas para reordenar y el switch para mostrar u ocultar cada seccion.
               </ThemedText>
 
-              <ScrollView
+              <FlatList
+                data={sections}
+                keyExtractor={(item) => item.key}
                 nestedScrollEnabled
                 style={{ flexGrow: 0, maxHeight: 420, marginBottom: 12 }}
                 contentContainerStyle={{ paddingBottom: 4 }}
                 showsVerticalScrollIndicator={false}
-              >
-              {sections.map((item, index) => (
-                <View
-                  key={item.key}
-                  style={{
-                    backgroundColor: `${primaryColor}14`,
-                    borderWidth: 1,
-                    borderColor: `${primaryColor}40`,
-                    borderRadius: 12,
-                    paddingVertical: 10,
-                    paddingHorizontal: 12,
-                    marginBottom: 8,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <ThemedText style={{ fontWeight: '700', fontSize: 13, flex: 1 }}>
-                    {SECTION_LABELS[item.key]}
-                  </ThemedText>
+                renderItem={({ item, index }) => (
+                  <View
+                    style={{
+                      backgroundColor: `${primaryColor}14`,
+                      borderWidth: 1,
+                      borderColor: `${primaryColor}40`,
+                      borderRadius: 12,
+                      paddingVertical: 10,
+                      paddingHorizontal: 12,
+                      marginBottom: 8,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <ThemedText style={{ fontWeight: '700', fontSize: 13, flex: 1 }}>
+                      {SECTION_LABELS[item.key]}
+                    </ThemedText>
 
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Switch
-                      value={item.visible}
-                      onValueChange={(value) => toggleVisibility(item.key, value)}
-                      trackColor={{ false: '#6b7280', true: `${primaryColor}88` }}
-                      thumbColor={item.visible ? primaryColor : '#f3f4f6'}
-                    />
-                    <TouchableOpacity
-                      onPress={() => moveUp(index)}
-                      disabled={index === 0}
-                      style={{ padding: 4, opacity: index === 0 ? 0.3 : 1 }}
-                    >
-                      <Ionicons name="arrow-up" size={18} color={textColor} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => moveDown(index)}
-                      disabled={index === sections.length - 1}
-                      style={{ padding: 4, opacity: index === sections.length - 1 ? 0.3 : 1 }}
-                    >
-                      <Ionicons name="arrow-down" size={18} color={textColor} />
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Switch
+                        value={item.visible}
+                        onValueChange={(value) => toggleVisibility(item.key, value)}
+                        trackColor={{ false: '#6b7280', true: `${primaryColor}88` }}
+                        thumbColor={item.visible ? primaryColor : '#f3f4f6'}
+                      />
+                      <TouchableOpacity
+                        onPress={() => moveUp(index)}
+                        disabled={index === 0}
+                        style={{ padding: 4, opacity: index === 0 ? 0.3 : 1 }}
+                      >
+                        <Ionicons name="arrow-up" size={18} color={textColor} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => moveDown(index)}
+                        disabled={index === sections.length - 1}
+                        style={{ padding: 4, opacity: index === sections.length - 1 ? 0.3 : 1 }}
+                      >
+                        <Ionicons name="arrow-down" size={18} color={textColor} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                </View>
-              ))}
-              </ScrollView>
+                )}
+              />
 
               <TouchableOpacity
                 onPress={() => onChangeSections(HOME_SECTIONS_CONFIG_DEFAULT)}

@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, onSnapshot, query, Timestamp, where } from 'firebase/firestore';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 export default function SaludFinancieraCard() {
@@ -14,15 +14,17 @@ export default function SaludFinancieraCard() {
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
 
+  const daysWindow = 7;
   const [loading, setLoading] = useState(true);
   const [ingresos, setIngresos] = useState(0);
   const [egresos, setEgresos] = useState(0);
+  const [movimientos, setMovimientos] = useState(0);
 
   useEffect(() => {
     if (!user?.uid) return;
 
     const start = new Date();
-    start.setDate(start.getDate() - 7);
+    start.setDate(start.getDate() - daysWindow);
     start.setHours(0, 0, 0, 0);
 
     const ref = collection(db, `users/${user.uid}/transacciones`);
@@ -33,17 +35,20 @@ export default function SaludFinancieraCard() {
       (snap) => {
         let nextIngresos = 0;
         let nextEgresos = 0;
+        let nextMovimientos = 0;
 
         snap.forEach((d) => {
           const data = d.data() as any;
           const amount = Number(data?.monto || 0);
           if (!amount) return;
+          nextMovimientos += 1;
           if (data?.tipo === 'ingreso') nextIngresos += amount;
           if (data?.tipo === 'egreso') nextEgresos += amount;
         });
 
         setIngresos(nextIngresos);
         setEgresos(nextEgresos);
+        setMovimientos(nextMovimientos);
         setLoading(false);
       },
       () => setLoading(false),
@@ -55,6 +60,9 @@ export default function SaludFinancieraCard() {
   const stats = useMemo(() => {
     const neto = ingresos - egresos;
     const tasa = ingresos > 0 ? (neto / ingresos) * 100 : egresos > 0 ? -100 : 0;
+    const promedioIngresos = ingresos / daysWindow;
+    const promedioEgresos = egresos / daysWindow;
+    const promedioNeto = neto / daysWindow;
 
     if (neto >= 0 && tasa >= 20) {
       return { color: '#22c55e', icon: 'pulse', estado: 'Excelente salud semanal' };
@@ -64,6 +72,12 @@ export default function SaludFinancieraCard() {
     }
     return { color: '#ef4444', icon: 'warning', estado: 'Balance negativo esta semana' };
   }, [ingresos, egresos]);
+
+  const neto = ingresos - egresos;
+  const tasaAhorro = ingresos > 0 ? (neto / ingresos) * 100 : egresos > 0 ? -100 : 0;
+  const promedioIngresos = ingresos / daysWindow;
+  const promedioEgresos = egresos / daysWindow;
+  const promedioNeto = neto / daysWindow;
 
   return (
     <ThemedView
@@ -90,11 +104,37 @@ export default function SaludFinancieraCard() {
         <ActivityIndicator color={primaryColor} />
       ) : (
         <>
-          <ThemedText style={{ fontSize: 12, opacity: 0.82, marginBottom: 10 }}>{stats.estado}</ThemedText>
+          <ThemedText style={{ fontSize: 12, opacity: 0.82, marginBottom: 4 }}>{stats.estado}</ThemedText>
+          <ThemedText style={{ fontSize: 11, opacity: 0.62, marginBottom: 10 }}>Últimos {daysWindow} días · {movimientos} movimientos</ThemedText>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 11, opacity: 0.68 }}>Ingresos</ThemedText>
+              <ThemedText style={{ fontSize: 14, color: '#22c55e', fontWeight: '700' }}>${ingresos.toFixed(0)}</ThemedText>
+            </View>
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 11, opacity: 0.68 }}>Gastos</ThemedText>
+              <ThemedText style={{ fontSize: 14, color: '#ef4444', fontWeight: '700' }}>${egresos.toFixed(0)}</ThemedText>
+            </View>
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 11, opacity: 0.68 }}>Neto</ThemedText>
+              <ThemedText style={{ fontSize: 14, color: textColor, fontWeight: '700' }}>${neto.toFixed(0)}</ThemedText>
+            </View>
+          </View>
+
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <ThemedText style={{ fontSize: 12, color: '#22c55e' }}>Ingresos: ${ingresos.toFixed(0)}</ThemedText>
-            <ThemedText style={{ fontSize: 12, color: '#ef4444' }}>Gastos: ${egresos.toFixed(0)}</ThemedText>
-            <ThemedText style={{ fontSize: 12, color: textColor }}>Neto: ${(ingresos - egresos).toFixed(0)}</ThemedText>
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 11, opacity: 0.68 }}>Prom. diario ingresos</ThemedText>
+              <ThemedText style={{ fontSize: 13, color: textColor, fontWeight: '600' }}>${promedioIngresos.toFixed(0)}</ThemedText>
+            </View>
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 11, opacity: 0.68 }}>Prom. diario gastos</ThemedText>
+              <ThemedText style={{ fontSize: 13, color: textColor, fontWeight: '600' }}>${promedioEgresos.toFixed(0)}</ThemedText>
+            </View>
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 11, opacity: 0.68 }}>Tasa de ahorro</ThemedText>
+              <ThemedText style={{ fontSize: 13, color: stats.color, fontWeight: '600' }}>{tasaAhorro.toFixed(0)}%</ThemedText>
+            </View>
           </View>
         </>
       )}

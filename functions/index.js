@@ -155,7 +155,45 @@ async function getEnabledPushTokens(userId) {
     console.error('Error obteniendo tokens de push:', error);
     return [];
   }
+
+  
 }
+
+async function syncCompraMesesProgressFromRecurring({ userId, compraMesId, recurringId }) {
+    if (!compraMesId) return;
+
+    const compraRef = db.doc(`users/${userId}/comprasMeses/${compraMesId}`);
+    const recurrenteRef = db.doc(`users/${userId}/gastosRecurrentes/${recurringId}`);
+
+    await db.runTransaction(async (tx) => {
+      const compraSnap = await tx.get(compraRef);
+      if (!compraSnap.exists) {
+        console.log(`Compra a meses no encontrada para sync: user=${userId} compraMesId=${compraMesId}`);
+        return;
+      }
+
+      const compra = compraSnap.data() || {};
+      const paidInstallments = Number(compra.paidInstallments || 0);
+      const months = Math.max(Number(compra.months || 0), 0);
+
+      if (months <= 0) {
+        return;
+      }
+
+      const nextPaidInstallments = Math.min(paidInstallments + 1, months);
+      tx.update(compraRef, {
+        paidInstallments: nextPaidInstallments,
+        updatedAt: new Date(),
+      });
+
+      if (nextPaidInstallments >= months) {
+        tx.update(recurrenteRef, {
+          activo: false,
+          updatedAt: new Date(),
+        });
+      }
+    });
+  }
 /**
  * Envía una notificación push a través de Expo
  * Ahora acepta un array de tokens para enviar a múltiples dispositivos
@@ -583,7 +621,19 @@ exports.processRecurringTransactions = functions.scheduler
                   transData.presupuestoCategoria = null;
                 }
 
+                if (g.source === 'compras_meses' && g.compraMesId) {
+                  transData.compraMesId = g.compraMesId;
+                }
+
                 await transaccionesRef.add(transData);
+
+                if (tipo === 'egreso' && g.source === 'compras_meses' && g.compraMesId) {
+                  await syncCompraMesesProgressFromRecurring({
+                    userId,
+                    compraMesId: g.compraMesId,
+                    recurringId: g.id,
+                  });
+                }
 
                 // Actualizar lastUpdate
                 await db.collection(ref).doc(g.id).update({

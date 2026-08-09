@@ -99,6 +99,7 @@ export default function Inicio() {
   const textColor = useThemeColor({light:'',dark:''},'text');
   const primaryColor = useThemeColor({light:'',dark:''},'primary');
   const borderColor = useThemeColor({light:'',dark:''},'border');
+  const iconColor = useThemeColor({ light: '', dark: '' }, 'icon');
 
   const [user, setUser] = useState<User | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
@@ -1754,7 +1755,7 @@ export default function Inicio() {
           zIndex: 20,
           bottom: 30,
           right: 20,
-          backgroundColor: "#5c6bf2",
+          backgroundColor: primaryColor,
           borderRadius: 28,
           width: 56,
           height: 56,
@@ -1768,7 +1769,7 @@ export default function Inicio() {
 
         }}
       >
-        <Ionicons name="add" size={30} color="white" />
+        <Ionicons name="add" size={30} color={iconColor} />
       </TouchableOpacity>
 
       <NuevaTransaccionModal

@@ -102,6 +102,9 @@ export default function PresupuestosScreen() {
   const cardsMain = useThemeColor({ light: '', dark: '' }, 'cardsMain');
   const progressBg = useThemeColor({ light: '', dark: '' }, 'progressBg');
   const backModalColor = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
+  const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
+  const primaryDarkColor = useThemeColor({ light: '', dark: '' }, 'primaryDark');
+  const headerColors: [string, string] = [primaryColor, primaryDarkColor || primaryColor];
 
   // 📡 Presupuestos personalizados
   useEffect(() => {
@@ -764,7 +767,7 @@ export default function PresupuestosScreen() {
       
       {/* ENCABEZADO */}
       <LinearGradient
-        colors={["#6366f1", "#8b5cf6"]}
+        colors={headerColors}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={{

@@ -88,7 +88,7 @@ export default function Settings() {
 
   // Modal References
   const modalRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['50%', '100%'], []);
+  const snapPoints = useMemo(() => ['100%', '100%'], []);
 
   // Theme Colors
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
@@ -680,6 +680,27 @@ export default function Settings() {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
+  function parseSubscriptionExpiryDate(rawExpiryTime: any) {
+    if (!rawExpiryTime) return null;
+
+    if (rawExpiryTime instanceof Date) {
+      return Number.isNaN(rawExpiryTime.getTime()) ? null : rawExpiryTime;
+    }
+
+    if (typeof rawExpiryTime?.toDate === 'function') {
+      const parsed = rawExpiryTime.toDate();
+      return parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed : null;
+    }
+
+    if (typeof rawExpiryTime?.seconds === 'number') {
+      const parsed = new Date(rawExpiryTime.seconds * 1000);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    const parsed = new Date(rawExpiryTime);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
   function getSubscriptionPlans(subscription: Subscription | undefined): SupportPlan[] {
     if (!subscription || !('subscriptionOfferDetails' in subscription)) return [];
 
@@ -733,25 +754,54 @@ export default function Settings() {
       setSyncingPlay(true);
       const purchases = await getAvailablePurchases();
       const subscriptionPurchases = purchases.filter((purchase) => supportedSkus.includes(purchase.productId));
+      const storedPurchaseToken = typeof subscriptionData?.purchaseToken === 'string'
+        ? subscriptionData.purchaseToken
+        : null;
 
       if (subscriptionPurchases.length === 0) {
-        await setDoc(
-          doc(db, `users/${uid}`),
-          {
-            supportSubscription: {
-              ...(subscriptionData || {}),
-              active: false,
+        if (storedPurchaseToken) {
+          const verified = await verifySubscriptionOnServer(storedPurchaseToken);
+          const verifiedData = (verified as any)?.data || null;
+          const verifiedActive = Boolean((verifiedData as any)?.active);
+
+          if ((verified as any)?.ok) {
+            await setDoc(
+              doc(db, `users/${uid}`),
+              {
+                supportSubscription: {
+                  ...(subscriptionData || {}),
+                  active: verifiedActive,
+                  pending: false,
+                  source: 'google_play_billing',
+                  lastVerifiedAt: new Date(),
+                  updatedAt: new Date(),
+                },
+              },
+              { merge: true }
+            );
+
+            setSubscriptionData((prev: any) => ({
+              ...(prev || {}),
+              active: verifiedActive,
               pending: false,
               source: 'google_play_billing',
-              lastVerifiedAt: new Date(),
-              updatedAt: new Date(),
-            },
-          },
-          { merge: true }
-        );
-        setSubscriptionData((prev: any) => ({ ...(prev || {}), active: false, pending: false }));
+            }));
+
+            if (showToastOnNoResult) {
+              ToastAndroid.showWithGravity(
+                verifiedActive
+                  ? 'Suscripción vigente confirmada por servidor'
+                  : 'La suscripción ya no tiene beneficios activos',
+                ToastAndroid.SHORT,
+                ToastAndroid.BOTTOM
+              );
+            }
+            return;
+          }
+        }
+
         if (showToastOnNoResult) {
-          ToastAndroid.showWithGravity('No se encontró una suscripción activa en Google Play', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
+          ToastAndroid.showWithGravity('No se encontró una compra local. El estado final depende de la verificación del servidor.', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
         }
         return;
       }
@@ -1376,6 +1426,22 @@ export default function Settings() {
     const amount = getAmountToUse();
     const isActive = Boolean(subscriptionData?.active);
     const isPending = Boolean(subscriptionData?.pending);
+    const rawExpiryTime = subscriptionData?.expiryTime;
+    const expiryDate = parseSubscriptionExpiryDate(rawExpiryTime);
+    const hasValidExpiryDate = Boolean(expiryDate);
+    const isCanceledSubscription = Boolean(
+      isActive && (
+        subscriptionData?.state === 'SUBSCRIPTION_STATE_CANCELED'
+        || subscriptionData?.autoRenewEnabled === false
+      )
+    );
+    const formattedExpiryDate = hasValidExpiryDate
+      ? expiryDate!.toLocaleDateString('es-MX', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        })
+      : null;
     const primaryActionLabel = closestSupportPlan
       ? selectedSupportAmount === 'custom'
         ? `Suscribirme con ${closestSupportPlan.amount} MXN`
@@ -1390,9 +1456,32 @@ export default function Settings() {
 
         <View style={{ backgroundColor: cardsMain, borderRadius: 12, padding: 16, marginBottom: 14 }}>
           <Text style={{ color: textColor, fontWeight: '700', marginBottom: 6 }}>Estado actual</Text>
-          <Text style={{ color: `${textColor}cc`, marginBottom: 4 }}>
-            {isActive ? 'Activa' : isPending ? 'Pendiente de confirmación' : 'Sin suscripción activa'}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
+            <Text style={{ color: `${textColor}cc`, fontWeight: '600', flex: 1 }}>
+              {isActive ? 'Activa' : isPending ? 'Pendiente de confirmación' : 'Sin suscripción activa'}
+            </Text>
+            {isCanceledSubscription && (
+              <View
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 999,
+                  backgroundColor: '#f59e0b22',
+                  borderWidth: 1,
+                  borderColor: '#f59e0b55',
+                }}
+              >
+                <Text style={{ color: '#f59e0b', fontSize: 11, fontWeight: '800' }}>
+                  Cancelada
+                </Text>
+              </View>
+            )}
+          </View>
+          {isCanceledSubscription && formattedExpiryDate && (
+            <Text style={{ color: `${textColor}99`, fontSize: 12, marginBottom: 4 }}>
+              Beneficios hasta el {formattedExpiryDate}
+            </Text>
+          )}
           {!!subscriptionData?.amount && (
             <Text style={{ color: `${textColor}99`, fontSize: 12 }}>
               Monto: {subscriptionData.amount} MXN
@@ -1702,7 +1791,7 @@ export default function Settings() {
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, alignItems: 'center' }}>
             <Text style={{ fontSize: 11, color: `${textColor}60`, textAlign: 'center' }}>
-              v3.0.0   | 
+              v3.0.1   | 
             </Text>
             <TouchableOpacity
               onPress={handleOpenInstagram}

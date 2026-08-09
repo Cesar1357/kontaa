@@ -33,15 +33,28 @@ const androidpublisher = google.androidpublisher({
 
 function mapPlaySubscriptionState(subscriptionState) {
   const state = subscriptionState || 'SUBSCRIPTION_STATE_UNSPECIFIED';
+  return { state };
+}
+
+function hasActiveEntitlement({ state, expiryTime }) {
   const activeStates = new Set([
     'SUBSCRIPTION_STATE_ACTIVE',
     'SUBSCRIPTION_STATE_IN_GRACE_PERIOD',
   ]);
 
-  return {
-    state,
-    active: activeStates.has(state),
-  };
+  if (activeStates.has(state)) {
+    return true;
+  }
+
+  if (state !== 'SUBSCRIPTION_STATE_CANCELED') {
+    return false;
+  }
+
+  if (!(expiryTime instanceof Date) || Number.isNaN(expiryTime.getTime())) {
+    return false;
+  }
+
+  return expiryTime.getTime() > Date.now();
 }
 
 function getLatestLineItem(subscription) {
@@ -88,12 +101,13 @@ async function verifyPlaySubscriptionAndPersist({ uid, purchaseToken, packageNam
   });
 
   const subscription = response?.data || {};
-  const { active, state } = mapPlaySubscriptionState(subscription.subscriptionState);
+  const { state } = mapPlaySubscriptionState(subscription.subscriptionState);
   const latestLineItem = getLatestLineItem(subscription);
 
   const productId = latestLineItem?.productId || 'konta_support';
   const expiryTime = latestLineItem?.expiryTime ? new Date(latestLineItem.expiryTime) : null;
   const autoRenewEnabled = latestLineItem?.autoRenewingPlan?.autoRenewEnabled;
+  const active = hasActiveEntitlement({ state, expiryTime });
 
   await upsertSupportSubscription(uid, {
     active,
@@ -1089,10 +1103,6 @@ exports.notifyPresupuestosPersonalizados = functions.scheduler
  * - Después de una compra exitosa
  * - En sincronización manual desde la app
  */
-// Change this:
-// exports.verifyPlaySubscription = functions.https.onCall(async (data, context) => { ... })
-
-// To this (v2 signature):
 exports.verifyPlaySubscription = onCall(async (request) => {
   const callerUid = request.auth?.uid;
   const data = request.data;
@@ -1110,48 +1120,8 @@ exports.verifyPlaySubscription = onCall(async (request) => {
     throw new HttpsError('permission-denied', 'No puedes verificar suscripciones de otro usuario.');
   }
 
-  try {
-    return await verifyPlaySubscriptionAndPersist({ uid, purchaseToken, packageName });
-  } catch (error) {
-    console.error('verifyPlaySubscription error:', error);
-
-    // Token inválido o suscripción no encontrada en Play => marcar como inactiva.
-    if (error?.code === 404 || error?.response?.status === 404) {
-      await upsertSupportSubscription(uid, {
-        active: false,
-        pending: false,
-        packageName: packageName || KONTA_ANDROID_PACKAGE,
-        purchaseToken,
-        state: 'NOT_FOUND',
-        lastVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      return {
-        uid,
-        active: false,
-        state: 'NOT_FOUND',
-      };
-    }
-
-    throw new HttpsError('internal', 'No se pudo verificar la suscripción en servidor.');
-  }
-});
-
-exports.verifyPlaySubscription = onCall(async (request) => {
-  const callerUid = request.auth?.uid;
-  const data = request.data;
-  
-  const requestedUid = typeof data?.uid === 'string' ? data.uid : null;
-  const purchaseToken = typeof data?.purchaseToken === 'string' ? data.purchaseToken : null;
-  const packageName = typeof data?.packageName === 'string' ? data.packageName : null;
-
-  if (!callerUid) {
-    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para verificar la suscripción.');
-  }
-
-  const uid = requestedUid || callerUid;
-  if (uid !== callerUid) {
-    throw new HttpsError('permission-denied', 'No puedes verificar suscripciones de otro usuario.');
+  if (!purchaseToken) {
+    throw new HttpsError('invalid-argument', 'purchaseToken es requerido.');
   }
 
   try {

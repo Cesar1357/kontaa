@@ -37,16 +37,16 @@ export const HOME_SECTIONS_CONFIG_DEFAULT: HomeSectionConfig[] = [
 ];
 
 const SECTION_LABELS: Record<HomeSectionKey, string> = {
-  'favorite-charts': 'Graficas favoritas',
-  'quick-access': 'Accesos rapidos',
+  'favorite-charts': 'Gráficas favoritas',
+  'quick-access': 'Accesos rápidos',
   weekly: 'Racha y resumen',
   health: 'Salud financiera semanal',
-  upcoming: 'Proximos recurrentes',
+  upcoming: 'Próximos recurrentes',
   'budget-risk': 'Riesgo de presupuesto',
   leaks: 'Top fugas de gasto',
   goal: 'Meta del mes',
   budget: 'Encabezado presupuesto',
-  summary: 'Resumen rapido',
+  summary: 'Resumen rápido',
   compare: 'Comparativa semanal',
 };
 

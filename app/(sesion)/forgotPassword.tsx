@@ -3,18 +3,18 @@ import { router } from 'expo-router';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    Easing,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    ToastAndroid,
-    TouchableOpacity,
-    View,
+  Alert,
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  ToastAndroid,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -147,7 +147,7 @@ export default function Forgot() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
-  backgroundDecor: { ...StyleSheet.absoluteFillObject },
+  backgroundDecor: StyleSheet.absoluteFill,
   glow: { position: 'absolute', width: 220, height: 220, borderRadius: 220 },
   scrollContent: {
     flexGrow: 1,

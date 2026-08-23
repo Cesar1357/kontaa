@@ -67,6 +67,16 @@ export default function PresupuestosScreen() {
   const [nuevoMainImagen, setNuevoMainImagen] = useState("");
   const [mainExpandidoId, setMainExpandidoId] = useState<string | null>(null);
   const [mainConNuevoSubId, setMainConNuevoSubId] = useState<string | null>(null);
+  const [editandoMainId, setEditandoMainId] = useState<string | null>(null);
+  const [editandoSubId, setEditandoSubId] = useState<string | null>(null);
+  const [editarMainNombre, setEditarMainNombre] = useState("");
+  const [editarMainIcono, setEditarMainIcono] = useState("");
+  const [editarSubNombre, setEditarSubNombre] = useState("");
+  const [editarSubTipo, setEditarSubTipo] = useState<"ingreso" | "egreso">("ingreso");
+  const [editarSubMonto, setEditarSubMonto] = useState("");
+  const [editarSubIcono, setEditarSubIcono] = useState("");
+  const [editarSubRapido, setEditarSubRapido] = useState(true);
+  const [editarSubPresupuestoCategoria, setEditarSubPresupuestoCategoria] = useState("");
   const [nuevoSubNombre, setNuevoSubNombre] = useState("");
   const [nuevoSubTipo, setNuevoSubTipo] = useState<"ingreso" | "egreso">("ingreso");
   const [nuevoSubMonto, setNuevoSubMonto] = useState("");
@@ -330,7 +340,16 @@ export default function PresupuestosScreen() {
   const totalLimite = presupuestosConGasto
   .filter((p) => p.categoria !== "Otros")
   .reduce((acc, p) => acc + (p.limite || 0), 0);
-  const porcentajeUsado = ((totalLimite / presupuestoMensual) * 100 || 0).toFixed(1);
+  const porcentajeOcupado = presupuestoMensual > 0 ? (totalLimite / presupuestoMensual) * 100 : 0;
+  const porcentajeUtilizado = presupuestoMensual > 0 ? (totalGastado / presupuestoMensual) * 100 : 0;
+  const getBudgetBarColor = (value: number) => {
+    if (value < 80) return '#22c55e';
+    if (value < 100) return '#f59e0b';
+    return '#ef4444';
+  };
+  const ocupadoColor = getBudgetBarColor(porcentajeOcupado);
+  const utilizadoColor = getBudgetBarColor(porcentajeUtilizado);
+  const porcentajeUsado = porcentajeOcupado.toFixed(1);
 
   // ➕ Agregar presupuesto personalizado
   const agregarPresupuesto = async () => {
@@ -654,6 +673,78 @@ export default function PresupuestosScreen() {
     }
   };
 
+  const iniciarEdicionMain = (main: any) => {
+    setEditandoMainId(main.id);
+    setEditarMainNombre(main.nombre || "");
+    setEditarMainIcono(main.icono || "💼");
+    setMainConNuevoSubId(null);
+    setEditandoSubId(null);
+  };
+
+  const guardarEdicionMain = async () => {
+    if (!currentUserId || !editandoMainId) return;
+    if (!editarMainNombre.trim() || !editarMainIcono.trim()) {
+      Alert.alert("Error", "Ingresa un nombre e icono válidos para el principal.");
+      return;
+    }
+
+    await updateDoc(doc(db, `users/${currentUserId}/preestablecidosMain`, editandoMainId), {
+      nombre: editarMainNombre.trim(),
+      icono: editarMainIcono.trim() || "💼",
+      updatedAt: new Date(),
+    });
+
+    setEditandoMainId(null);
+    setEditarMainNombre("");
+    setEditarMainIcono("");
+  };
+
+  const iniciarEdicionSub = (sub: any) => {
+    setEditandoSubId(sub.id);
+    setEditarSubNombre(sub.nombre || "");
+    setEditarSubTipo(sub.tipo === "egreso" ? "egreso" : "ingreso");
+    setEditarSubMonto(String(sub.montoDefault ?? ""));
+    setEditarSubIcono(sub.icono || "⚡");
+    setEditarSubRapido(Boolean(sub.accesoRapido));
+    setEditarSubPresupuestoCategoria(sub.presupuestoCategoria || "");
+    setMainConNuevoSubId(null);
+    setEditandoMainId(null);
+  };
+
+  const guardarEdicionSub = async () => {
+    if (!currentUserId || !editandoSubId) return;
+    if (!editarSubNombre.trim() || !editarSubIcono.trim()) {
+      Alert.alert("Error", "Completa el nombre e icono del sub preestablecido.");
+      return;
+    }
+
+    const monto = parseFloat(editarSubMonto);
+    if (isNaN(monto) || monto <= 0) {
+      Alert.alert("Error", "Monto inválido para el sub preestablecido.");
+      return;
+    }
+
+    const subActual = preestablecidosSubs.find((s) => s.id === editandoSubId);
+    await updateDoc(doc(db, `users/${currentUserId}/preestablecidosSubs`, editandoSubId), {
+      nombre: editarSubNombre.trim(),
+      tipo: editarSubTipo,
+      montoDefault: monto,
+      icono: editarSubIcono.trim() || "⚡",
+      presupuestoCategoria: editarSubTipo === "egreso" ? (editarSubPresupuestoCategoria || null) : null,
+      accesoRapido: editarSubRapido,
+      mainNombre: subActual?.mainNombre || "Sin principal",
+      updatedAt: new Date(),
+    });
+
+    setEditandoSubId(null);
+    setEditarSubNombre("");
+    setEditarSubTipo("ingreso");
+    setEditarSubMonto("");
+    setEditarSubIcono("");
+    setEditarSubRapido(true);
+    setEditarSubPresupuestoCategoria("");
+  };
+
   const setQuickWidgetPromptChoice = async (choice: 'added' | 'dismissed') => {
     if (!currentUserId) return;
 
@@ -787,14 +878,46 @@ export default function PresupuestosScreen() {
         >
           ${totalGastado.toFixed(2)} / ${presupuestoGeneral.mes.toFixed(2)}
         </Text>
-        <Text style={{ color: "#fff", opacity: 0.8, marginTop: 4 }}>
-            Presupuesto ocupado:{" "}
-            {porcentajeUsado}%
-          </Text>
-          <Text style={{ color: "#fff", opacity: 0.8, marginTop: 4 }}>
-            Presupuesto utilizado:{" "}
-            {((totalGastado / presupuestoGeneral.mes) * 100 || 0).toFixed(1)}%
-          </Text>
+
+        <View style={{ marginTop: 14 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+            <Text style={{ color: '#fff', opacity: 0.82, fontSize: 12 }}>Presupuesto ocupado</Text>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{porcentajeUsado}%</Text>
+          </View>
+
+          <View style={{ height: 10, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 999, overflow: 'hidden', position: 'relative' }}>
+            <View
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${Math.min(porcentajeOcupado, 100)}%`,
+                backgroundColor: `${ocupadoColor}66`,
+                borderRadius: 999,
+              }}
+            />
+
+            <View
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${Math.min(porcentajeUtilizado, 100)}%`,
+                backgroundColor: utilizadoColor,
+                borderRadius: 999,
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.7)',
+              }}
+            />
+          </View>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+            <Text style={{ color: '#fff', opacity: 0.75, fontSize: 11 }}>Utilizado</Text>
+            <Text style={{ color: '#fff', opacity: 0.9, fontSize: 11, fontWeight: '700' }}>{porcentajeUtilizado.toFixed(1)}%</Text>
+          </View>
+        </View>
       </LinearGradient>
 
       {/* BOTONES DE SECCIÓN */}
@@ -978,11 +1101,37 @@ export default function PresupuestosScreen() {
                           {mostrandoNuevoSub ? "Cerrar" : "Nueva acción"}
                         </Text>
                       </TouchableOpacity>
+                      <TouchableOpacity onPress={() => iniciarEdicionMain(main)}>
+                        <Text style={{ color: "#5c6bf2", fontWeight: "600" }}>Editar</Text>
+                      </TouchableOpacity>
                       <TouchableOpacity onPress={() => eliminarPreestablecidoMain(main.id)}>
                         <Text style={{ color: "#f87171", fontWeight: "600" }}>Eliminar</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
+
+                  {editandoMainId === main.id && (
+                    <Animated.View layout={Layout.springify()} style={{ backgroundColor: cardsMain, borderRadius: 12, padding: 12, marginBottom: 10 }}>
+                      <TextInput
+                        placeholder="Nombre del principal"
+                        placeholderTextColor="#888"
+                        value={editarMainNombre}
+                        onChangeText={setEditarMainNombre}
+                        style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
+                      />
+                      <TextInput
+                        placeholder="Icono o emoji"
+                        placeholderTextColor="#888"
+                        value={editarMainIcono}
+                        maxLength={2}
+                        onChangeText={setEditarMainIcono}
+                        style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 12, paddingVertical: 4 }}
+                      />
+                      <TouchableOpacity onPress={guardarEdicionMain} style={{ backgroundColor: "#6366f1", paddingVertical: 10, borderRadius: 10, alignItems: "center" }}>
+                        <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar principal</Text>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  )}
 
                   {mostrandoNuevoSub && (
                     <Animated.View layout={Layout.springify()} style={{ backgroundColor: cardsMain, borderRadius: 12, padding: 12, marginBottom: 10 }}>
@@ -1086,33 +1235,119 @@ export default function PresupuestosScreen() {
                       ) : (
                         subsMain.map((item) => (
                           <View key={item.id} style={{ backgroundColor: cardsMain, borderRadius: 10, padding: 10, marginBottom: 8 }}>
-                            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                              <View style={{ flex: 1 }}>
-                                <ThemedText style={{ fontWeight: "700" }}>{(item.icono || "⚡") + " " + item.nombre}</ThemedText>
-                                <Text style={{ color: "#aaa", fontSize: 12 }}>
-                                  {item.tipo} • ${Number(item.montoDefault || 0).toFixed(2)}
-                                </Text>
+                            <TouchableOpacity
+                              activeOpacity={0.9}
+                              onPress={() => {
+                                if (editandoSubId === item.id) {
+                                  setEditandoSubId(null);
+                                  return;
+                                }
+                                iniciarEdicionSub(item);
+                              }}
+                            >
+                              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                                <View style={{ flex: 1 }}>
+                                  <ThemedText style={{ fontWeight: "700" }}>{(item.icono || "⚡") + " " + item.nombre}</ThemedText>
+                                  <Text style={{ color: "#aaa", fontSize: 12 }}>
+                                    {item.tipo} • ${Number(item.montoDefault || 0).toFixed(2)}
+                                  </Text>
+                                </View>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                  <TouchableOpacity
+                                    onPress={() => toggleSubWidgetStar(item.id, !item.widgetStarred)}
+                                    style={{ backgroundColor: item.widgetStarred ? "#f59e0b" : "#555", borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8, justifyContent: "center", alignItems: "center", }}
+                                  >
+                                    <Text style={{ color: item.widgetStarred ? "black" : "white", fontWeight: "600", marginBottom: 3 }}>★</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() => toggleSubRapido(item.id, !item.accesoRapido)}
+                                    style={{ backgroundColor: item.accesoRapido ? "#3edc81" : "#555", borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8 }}
+                                  >
+                                    <Text style={{ color: item.accesoRapido ? "black" : "white", fontWeight: "600" }}>
+                                      {item.accesoRapido ? "Rápido" : "Off"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity onPress={() => eliminarPreestablecidoSub(item.id)}>
+                                    <Text style={{ color: "#f87171", fontWeight: "600" }}>Eliminar</Text>
+                                  </TouchableOpacity>
+                                </View>
                               </View>
-                              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                            </TouchableOpacity>
+
+                            {editandoSubId === item.id && (
+                              <Animated.View layout={Layout.springify()} style={{ marginTop: 10, backgroundColor: "rgba(255,255,255,0.02)", borderRadius: 8, padding: 10 }}>
+                                <TextInput
+                                  placeholder="Nombre de la acción"
+                                  placeholderTextColor="#888"
+                                  value={editarSubNombre}
+                                  onChangeText={setEditarSubNombre}
+                                  style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
+                                />
+                                <View style={{ flexDirection: "row", marginBottom: 10 }}>
+                                  <TouchableOpacity
+                                    onPress={() => setEditarSubTipo("ingreso")}
+                                    style={[styles.tipoBtn, { backgroundColor: editarSubTipo === "ingreso" ? "#3edc81" : "#2a2a2a" } as const]}
+                                  >
+                                    <Text style={{ color: editarSubTipo === "ingreso" ? "black" : "white", fontWeight: "600" }}>Ingreso</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() => setEditarSubTipo("egreso")}
+                                    style={[styles.tipoBtn, { backgroundColor: editarSubTipo === "egreso" ? "#ff6363" : "#2a2a2a" } as const]}
+                                  >
+                                    <Text style={{ color: editarSubTipo === "egreso" ? "black" : "white", fontWeight: "600" }}>Egreso</Text>
+                                  </TouchableOpacity>
+                                </View>
+                                <TextInput
+                                  placeholder="Monto por defecto"
+                                  placeholderTextColor="#888"
+                                  keyboardType="numeric"
+                                  value={editarSubMonto}
+                                  onChangeText={setEditarSubMonto}
+                                  style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
+                                />
+                                {editarSubTipo === "egreso" && presupuestos.length > 0 && (
+                                  <View style={{ marginBottom: 10 }}>
+                                    <Text style={{ color: textColor, marginBottom: 6, fontWeight: "500" }}>Asociar a presupuesto:</Text>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                      <TouchableOpacity
+                                        onPress={() => setEditarSubPresupuestoCategoria("")}
+                                        style={[styles.presupuestoBtn, { backgroundColor: !editarSubPresupuestoCategoria ? "#6366f1" : "#2a2a2a" }]}
+                                      >
+                                        <Text style={{ color: "white" }}>Ninguno</Text>
+                                      </TouchableOpacity>
+                                      {presupuestos.filter((p) => p.categoria !== "Otros").map((p) => (
+                                        <TouchableOpacity
+                                          key={p.id || p.categoria}
+                                          onPress={() => setEditarSubPresupuestoCategoria(editarSubPresupuestoCategoria === p.categoria ? "" : p.categoria)}
+                                          style={[styles.presupuestoBtn, { backgroundColor: editarSubPresupuestoCategoria === p.categoria ? "#6366f1" : "#2a2a2a" }]}
+                                        >
+                                          <Text style={{ color: "white" }}>{p.categoria}</Text>
+                                        </TouchableOpacity>
+                                      ))}
+                                    </ScrollView>
+                                  </View>
+                                )}
+                                <TextInput
+                                  placeholder="Icono o emoji"
+                                  placeholderTextColor="#888"
+                                  value={editarSubIcono}
+                                  maxLength={2}
+                                  onChangeText={setEditarSubIcono}
+                                  style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 10, paddingVertical: 4 }}
+                                />
                                 <TouchableOpacity
-                                  onPress={() => toggleSubWidgetStar(item.id, !item.widgetStarred)}
-                                  style={{ backgroundColor: item.widgetStarred ? "#f59e0b" : "#555", borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8, justifyContent: "center", alignItems: "center", }}
+                                  onPress={() => setEditarSubRapido(!editarSubRapido)}
+                                  style={{ marginBottom: 12, backgroundColor: editarSubRapido ? "#3edc81" : "#444", borderRadius: 8, paddingVertical: 8, alignItems: "center" }}
                                 >
-                                  <Text style={{ color: item.widgetStarred ? "black" : "white", fontWeight: "600", marginBottom: 3 }}>★</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  onPress={() => toggleSubRapido(item.id, !item.accesoRapido)}
-                                  style={{ backgroundColor: item.accesoRapido ? "#3edc81" : "#555", borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8 }}
-                                >
-                                  <Text style={{ color: item.accesoRapido ? "black" : "white", fontWeight: "600" }}>
-                                    {item.accesoRapido ? "Rápido" : "Off"}
+                                  <Text style={{ color: editarSubRapido ? "black" : "white", fontWeight: "600" }}>
+                                    {editarSubRapido ? "Acceso rápido: Activo" : "Acceso rápido: Inactivo"}
                                   </Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity onPress={() => eliminarPreestablecidoSub(item.id)}>
-                                  <Text style={{ color: "#f87171", fontWeight: "600" }}>Eliminar</Text>
+                                <TouchableOpacity onPress={guardarEdicionSub} style={{ backgroundColor: "#6366f1", paddingVertical: 10, borderRadius: 10, alignItems: "center" }}>
+                                  <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar cambios</Text>
                                 </TouchableOpacity>
-                              </View>
-                            </View>
+                              </Animated.View>
+                            )}
                           </View>
                         ))
                       )}

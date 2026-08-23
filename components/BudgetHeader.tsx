@@ -5,26 +5,26 @@ import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
 import {
-    collection,
-    doc,
-    onSnapshot,
-    orderBy,
-    query,
-    Timestamp,
-    where,
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  Timestamp,
+  where,
 } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Dimensions,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import Animated, {
-    useAnimatedStyle,
-    useSharedValue,
-    withTiming,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
 } from 'react-native-reanimated';
 import { RFValue } from 'react-native-responsive-fontsize';
 
@@ -209,7 +209,7 @@ export default function PresupuestoHeader() {
       {/* --- Fila superior --- */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%' }}>
         <View style={{maxWidth: '80%'}}>
-          <ThemedText style={{ fontSize: RFValue(13), color: '#aaa', marginBottom: 4 }}>
+          <ThemedText style={{ fontSize: RFValue(13), marginBottom: 4 }}>
             Presupuesto ({range === 'D' ? 'Diario' : range === 'S' ? 'Semanal' : 'Mensual'})
           </ThemedText>
           {loading ? (

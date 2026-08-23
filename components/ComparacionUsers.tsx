@@ -1,13 +1,13 @@
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  collection,
-  getDocs,
-  limit,
-  query,
-  where,
+    collection,
+    getDocs,
+    limit,
+    query,
+    where,
 } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { RFValue } from "react-native-responsive-fontsize";
 import { db } from "../config/firebase";
@@ -157,7 +157,9 @@ export default function CardComparativaTransacciones() {
 
   return (
     <View style={styles.simpleCard}>
-      <Ionicons name="stats-chart" size={22} color="#5c6bf2" style={{ marginRight: 10 }} />
+      <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(92,107,242,0.12)', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+        <Ionicons name="stats-chart" size={18} color="#5c6bf2" />
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.simpleCardTitle}>Comparativa semanal</Text>
         <Text style={[styles.simpleCardText, { marginBottom: 8 }]}>Comparado con {sampleSize} usuarios.</Text>
@@ -171,7 +173,7 @@ export default function CardComparativaTransacciones() {
           return (
             <View key={item.label} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
               <Text style={{ color: textColor, fontSize: 12 }}>{item.label}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${color}18`, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 }}>
                 <Ionicons name={icon as any} size={12} color={color} style={{ marginRight: 4 }} />
                 <Text style={{ color, fontSize: 12, fontWeight: '700' }}>
                   {Math.abs(rawDelta).toFixed(1)}%

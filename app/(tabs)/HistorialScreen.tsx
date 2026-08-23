@@ -81,6 +81,15 @@ export default function HistorialScreen() {
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
   const primaryDarkColor = useThemeColor({ light: '', dark: '' }, 'primaryDark');
   const headerColors: [string, string] = [primaryColor, primaryDarkColor || primaryColor];
+  const axisLabelTextStyle = { color: textColor, fontSize: 10 };
+  const extraChartRightSpace = 120;
+
+  const getBarChartLayout = (dataLength: number, barWidth: number, minWidth: number, minGap: number = 18) => {
+    const safeLength = Math.max(1, dataLength);
+    const width = Math.max(minWidth, safeLength * (barWidth + minGap));
+    const spacing = Math.max(minGap, (width - safeLength * barWidth) / Math.max(1, safeLength - 1));
+    return { width, spacing };
+  };
 
   const [filtered, setFiltered] = useState<any[]>([]);
   const [filteredChart, setFilteredChart] = useState<any[]>([]);
@@ -88,13 +97,16 @@ export default function HistorialScreen() {
   const [activeChartIndex, setActiveChartIndex] = useState(0);
 
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
-  const [dateStep, setDateStep] = useState<'start' | 'end'>('start');
+  const [dateStep, setDateStep] = useState<'start' | 'end' | 'month'>('start');
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [range, setRange] = useState<'Total' | '1S' | '1A' | '1M'>('Total');
   const [selectedTipos, setSelectedTipos] = useState<string[]>([]);
   const [selectedCategorias, setSelectedCategorias] = useState<string[]>([]);
+  const [selectedSubcategorias, setSelectedSubcategorias] = useState<string[]>([]);
   const [selectedPreestablecidos, setSelectedPreestablecidos] = useState<string[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState<Date | null>(null);
+  const [amountFilter, setAmountFilter] = useState<'all' | '0-99' | '100-499' | '500-999' | '1000-4999' | '5000+' >('all');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [chartSelectionMode, setChartSelectionMode] = useState<'recent' | 'distributed' | 'balancedWeek' | 'balancedMonth'>('distributed');
   const [showChartControls, setShowChartControls] = useState(false);
@@ -114,6 +126,15 @@ export default function HistorialScreen() {
     { key: '1M', label: '30 días' },
     { key: '1A', label: '12 meses' },
   ];
+
+  const amountRangeOptions = [
+    { key: 'all', label: 'Todas' },
+    { key: '0-99', label: '0-99' },
+    { key: '100-499', label: '100-499' },
+    { key: '500-999', label: '500-999' },
+    { key: '1000-4999', label: '1000-4999' },
+    { key: '5000+', label: '5000+' },
+  ] as const;
 
   const visibleChartCards = useMemo(
     () => chartCardsConfig.filter((item) => item.visible).map((item) => ({ key: item.key, ...HISTORIAL_CHART_META[item.key] })),
@@ -519,6 +540,23 @@ export default function HistorialScreen() {
     return Array.from(found).sort((a, b) => a.localeCompare(b));
   }, [transacciones]);
 
+  const subcategoriaOptions = useMemo(() => {
+    if (selectedCategorias.length === 0) return [];
+
+    const found = new Set<string>();
+    transacciones.forEach((tx) => {
+      const category = tx?.presupuestoCategoria || tx?.categoria || tx?.categoriaNombre;
+      if (!selectedCategorias.includes(category || '')) return;
+
+      const subcategoria = tx?.subcategoria || tx?.subCategoria || tx?.subcategory || tx?.subcategoriaNombre;
+      if (subcategoria && String(subcategoria).trim()) {
+        found.add(String(subcategoria));
+      }
+    });
+
+    return Array.from(found).sort((a, b) => a.localeCompare(b));
+  }, [selectedCategorias, transacciones]);
+
   const toggleSelection = (
     option: string,
     selected: string[],
@@ -602,24 +640,34 @@ export default function HistorialScreen() {
       );
     } else {
       switch (range) {
-        case '1S':
+        case '1S': {
           const weekAgo = new Date(now);
           weekAgo.setDate(now.getDate() - 7);
           filteredData = transacciones.filter((t) => t.date >= weekAgo);
           break;
-        case '1M':
+        }
+        case '1M': {
           const monthAgo = new Date(now);
           monthAgo.setMonth(now.getMonth() - 1);
           filteredData = transacciones.filter((t) => t.date >= monthAgo);
           break;
-        case '1A':
+        }
+        case '1A': {
           const yearAgo = new Date(now);
           yearAgo.setFullYear(now.getFullYear() - 1);
           filteredData = transacciones.filter((t) => t.date >= yearAgo);
           break;
+        }
         default:
           break;
       }
+    }
+
+    if (selectedMonth) {
+      const monthStart = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 1);
+      const monthEnd = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0, 23, 59, 59, 999);
+      filteredData = filteredData.filter((t) => t.date >= monthStart && t.date <= monthEnd);
+      setRange('Total');
     }
 
     if (selectedTipos.length > 0) {
@@ -630,8 +678,28 @@ export default function HistorialScreen() {
       filteredData = filteredData.filter((t) => selectedCategorias.includes(t.presupuestoCategoria || ''));
     }
 
+    if (selectedSubcategorias.length > 0) {
+      filteredData = filteredData.filter((t) => {
+        const subcategoria = t.subcategoria || t.subCategoria || t.subcategory || t.subcategoriaNombre;
+        return subcategoria && selectedSubcategorias.includes(String(subcategoria));
+      });
+    }
+
     if (selectedPreestablecidos.length > 0) {
       filteredData = filteredData.filter((t) => selectedPreestablecidos.includes(t.preestablecidoMainNombre || ''));
+    }
+
+    if (amountFilter !== 'all') {
+      const amountRange = amountFilter.split('-').length > 1 ? amountFilter : null;
+      filteredData = filteredData.filter((t) => {
+        const amount = Number(t.monto || 0);
+        if (amountFilter === '5000+') return amount >= 5000;
+        if (!amountRange) return true;
+        const [minRaw, maxRaw] = amountRange.split('-');
+        const min = Number(minRaw);
+        const max = Number(maxRaw);
+        return amount >= min && amount <= max;
+      });
     }
 
     filteredData.sort((a, b) => {
@@ -642,7 +710,7 @@ export default function HistorialScreen() {
 
     setFiltered(filteredData);
     setFilteredChart([...filteredData].reverse());
-  }, [transacciones, range, startDate, endDate, selectedTipos, selectedCategorias, selectedPreestablecidos]);
+  }, [transacciones, range, startDate, endDate, selectedTipos, selectedCategorias, selectedSubcategorias, selectedPreestablecidos, selectedMonth, amountFilter]);
 
   const handleChartRailScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (visibleChartCards.length === 0) return;
@@ -670,6 +738,25 @@ export default function HistorialScreen() {
         },
       ],
     );
+  };
+
+  const handleToggleAdvancedFilters = () => {
+    if (!subscriptionActive) {
+      Alert.alert(
+        'Función Premium',
+        'Los filtros avanzados están disponibles con suscripción activa.',
+        [
+          { text: 'Ahora no', style: 'cancel' },
+          {
+            text: 'Obtener suscripción',
+            onPress: () => router.push({ pathname: '/(screens)/Settings', params: { openSubscription: '1' } }),
+          },
+        ],
+      );
+      return;
+    }
+
+    setShowAdvancedFilters((prev) => !prev);
   };
 
   const toggleFavoriteChart = async (chart: { key: HistorialChartKey; title: string; subtitle: string }) => {
@@ -730,39 +817,57 @@ export default function HistorialScreen() {
     });
   };
 
-  const showPicker = (type: 'start' | 'end') => {
+  const showPicker = (type: 'start' | 'end' | 'month') => {
     setDateStep(type);
     setDatePickerVisible(true);
   };
 
   const handleConfirm = (date: Date) => {
     setDatePickerVisible(false);
+
+    if (dateStep === 'month') {
+      setSelectedMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+      setStartDate(null);
+      setEndDate(null);
+      setRange('Total');
+      return;
+    }
+
     if (dateStep === 'start') {
+      setSelectedMonth(null);
       setStartDate(startOfDay(date));
       setTimeout(() => showPicker('end'), 400);
-    } else {
-      setEndDate(endOfDay(date));
+      return;
     }
+
+    setEndDate(endOfDay(date));
   };
 
   const clearFilters = () => {
     setStartDate(null);
     setEndDate(null);
+    setSelectedMonth(null);
     setRange('Total');
     setSelectedTipos([]);
     setSelectedCategorias([]);
+    setSelectedSubcategorias([]);
     setSelectedPreestablecidos([]);
+    setAmountFilter('all');
   };
 
   const customRangeLabel = startDate && endDate
     ? `${format(startDate, 'dd/MM')} - ${format(endDate, 'dd/MM')}`
-    : 'Seleccionar rango';
+    : selectedMonth
+      ? format(selectedMonth, 'MMM yyyy')
+      : 'Seleccionar rango';
 
-  const rangeLabel = startDate && endDate
-    ? `Rango personalizado: ${customRangeLabel}`
-    : `Mostrando: ${rangeOptions.find((opt) => opt.key === range)?.label || 'Todos'}`;
+  const rangeLabel = selectedMonth
+    ? `Mes seleccionado: ${format(selectedMonth, 'MMMM yyyy')}`
+    : startDate && endDate
+      ? `Rango personalizado: ${customRangeLabel}`
+      : `Mostrando: ${rangeOptions.find((opt) => opt.key === range)?.label || 'Todos'}`;
 
-  const activeAdvancedFilters = selectedTipos.length + selectedCategorias.length + selectedPreestablecidos.length;
+  const activeAdvancedFilters = selectedTipos.length + selectedCategorias.length + selectedSubcategorias.length + selectedPreestablecidos.length + (amountFilter !== 'all' ? 1 : 0) + (selectedMonth ? 1 : 0);
 
   const chartSelectionModeLabel =
     chartSelectionMode === 'distributed'
@@ -872,13 +977,14 @@ export default function HistorialScreen() {
               <TouchableOpacity
                 key={f.key}
                 onPress={() => {
+                    setSelectedMonth(null);
                     setRange(f.key as 'Total' | '1S' | '1M' | '1A');
                     setStartDate(null);
                     setEndDate(null);
                     }}
                 style={{
                   backgroundColor:
-                    range === f.key && !startDate ? "#6366f1" : progressBg,
+                    range === f.key && !startDate && !selectedMonth ? "#6366f1" : progressBg,
                   paddingHorizontal: 12,
                   paddingVertical: 10,
                   borderRadius: 20,
@@ -886,11 +992,26 @@ export default function HistorialScreen() {
                   marginBottom: 8,
                 }}
               >
-                <ThemedText style={{ color: range === f.key && !startDate ? '#fff' : '#9ca3af', fontSize: RFValue(12), textTransform: 'capitalize' }}>
+                <ThemedText style={{ color: range === f.key && !startDate && !selectedMonth ? '#fff' : '#9ca3af', fontSize: RFValue(12), textTransform: 'capitalize' }}>
                   {f.label}
                 </ThemedText>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity
+              onPress={() => showPicker('month')}
+              style={{
+                paddingVertical: 10,
+                paddingHorizontal: 12,
+                borderRadius: 20,
+                backgroundColor: 'rgba(120,82,255,0.16)',
+                marginRight: 8,
+                marginBottom: 8,
+              }}
+            >
+              <ThemedText style={{ fontSize: RFValue(12), color: textColor }}>
+                Mes: {selectedMonth ? format(selectedMonth, 'MMM yyyy') : 'Seleccionar'}
+              </ThemedText>
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => showPicker('start')}
               style={{
@@ -906,7 +1027,7 @@ export default function HistorialScreen() {
                 Fecha: {customRangeLabel}
               </ThemedText>
             </TouchableOpacity>
-            {(startDate || endDate) && (
+            {(startDate || endDate || selectedMonth || selectedTipos.length > 0 || selectedCategorias.length > 0 || selectedPreestablecidos.length > 0 || amountFilter !== 'all' || activeAdvancedFilters > 0) && (
               <TouchableOpacity
                 onPress={clearFilters}
                 style={{
@@ -918,24 +1039,26 @@ export default function HistorialScreen() {
                 }}
               >
                 <ThemedText style={{ color: textColor, fontSize: RFValue(12) }}>
-                  Limpiar
+                  Quitar filtros
                 </ThemedText>
               </TouchableOpacity>
             )}
           </View>
           <TouchableOpacity
-            onPress={() => setShowAdvancedFilters((prev) => !prev)}
+            onPress={handleToggleAdvancedFilters}
             style={{
               marginTop: 8,
               alignSelf: 'flex-start',
               paddingHorizontal: 12,
               paddingVertical: 8,
               borderRadius: 14,
-              backgroundColor: 'rgba(99,102,241,0.2)',
+              backgroundColor: subscriptionActive ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.12)',
+              borderWidth: 1,
+              borderColor: subscriptionActive ? 'rgba(99,102,241,0.35)' : 'rgba(99,102,241,0.18)',
             }}
           >
-            <ThemedText style={{ fontSize: 12 }}>
-              {showAdvancedFilters ? 'Ocultar filtros avanzados' : 'Mostrar filtros avanzados'}
+            <ThemedText style={{ fontSize: 12, opacity: subscriptionActive ? 1 : 0.8 }}>
+              {showAdvancedFilters ? 'Ocultar filtros avanzados' : subscriptionActive ? 'Mostrar filtros avanzados' : 'Filtros avanzados • Premium'}
             </ThemedText>
           </TouchableOpacity>
 
@@ -964,6 +1087,29 @@ export default function HistorialScreen() {
                 </View>
               </View>
 
+              <View style={{ marginTop: 6 }}>
+                <ThemedText style={{ fontSize: 13, marginBottom: 6, color: '#9ca3af' }}>Cantidad</ThemedText>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 2 }}>
+                  {amountRangeOptions.map((opcion) => (
+                    <Chip
+                      key={opcion.key}
+                      selected={amountFilter === opcion.key}
+                      compact
+                      mode="flat"
+                      onPress={() => setAmountFilter(opcion.key)}
+                      textStyle={{ color: amountFilter === opcion.key ? '#ffffff' : '#9ca3af' }}
+                      style={{
+                        margin: 4,
+                        alignSelf: 'flex-start',
+                        backgroundColor: amountFilter === opcion.key ? 'rgba(251,191,36,0.3)' : progressBg,
+                      }}
+                    >
+                      {opcion.label}
+                    </Chip>
+                  ))}
+                </View>
+              </View>
+
               {categoriaOptions.length > 0 && (
                 <View style={{ marginTop: 4 }}>
                   <ThemedText style={{ fontSize: 13, marginBottom: 6, color: '#9ca3af' }}>Categoría</ThemedText>
@@ -974,12 +1120,45 @@ export default function HistorialScreen() {
                         selected={selectedCategorias.includes(opcion)}
                         compact
                         mode="flat"
-                        onPress={() => toggleSelection(opcion, selectedCategorias, setSelectedCategorias)}
+                        onPress={() => {
+                          const next = selectedCategorias.includes(opcion)
+                            ? selectedCategorias.filter((item) => item !== opcion)
+                            : [...selectedCategorias, opcion];
+                          setSelectedCategorias(next);
+                          if (!selectedCategorias.includes(opcion)) {
+                            setSelectedSubcategorias([]);
+                          }
+                        }}
                         textStyle={{ color: selectedCategorias.includes(opcion) ? '#ffffff' : '#9ca3af' }}
                         style={{
                           margin: 4,
                           alignSelf: 'flex-start',
                           backgroundColor: selectedCategorias.includes(opcion) ? 'rgba(139,92,246,0.35)' : progressBg,
+                        }}
+                      >
+                        {opcion}
+                      </Chip>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {selectedCategorias.length > 0 && subcategoriaOptions.length > 0 && (
+                <View style={{ marginTop: 4 }}>
+                  <ThemedText style={{ fontSize: 13, marginBottom: 6, color: '#9ca3af' }}>Subcategoría</ThemedText>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 2 }}>
+                    {subcategoriaOptions.map((opcion) => (
+                      <Chip
+                        key={opcion}
+                        selected={selectedSubcategorias.includes(opcion)}
+                        compact
+                        mode="flat"
+                        onPress={() => toggleSelection(opcion, selectedSubcategorias, setSelectedSubcategorias)}
+                        textStyle={{ color: selectedSubcategorias.includes(opcion) ? '#ffffff' : '#9ca3af' }}
+                        style={{
+                          margin: 4,
+                          alignSelf: 'flex-start',
+                          backgroundColor: selectedSubcategorias.includes(opcion) ? 'rgba(14,165,233,0.35)' : progressBg,
                         }}
                       >
                         {opcion}
@@ -1292,72 +1471,112 @@ export default function HistorialScreen() {
                     {card.key === 'bars' && (
                         <ScrollView style={{ marginTop: 8 }} showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
                         <ThemedText style={{ color: '#cbd5e1', fontSize: 11, marginBottom: 4 }}>Movimientos diarios</ThemedText>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true} scrollEnabled={true}>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          nestedScrollEnabled={true}
+                          scrollEnabled={true}
+                          contentContainerStyle={{ paddingRight: 24 }}
+                        >
                           <BarChart
                             data={chartSummary.movementBars}
                             barWidth={10}
-                            spacing={12}
+                            spacing={getBarChartLayout(chartSummary.movementBars.length, 10, chartCardWidth + extraChartRightSpace).spacing}
                             roundedTop
                             hideRules
                             noOfSections={3}
                             yAxisThickness={0}
                             xAxisThickness={0}
-                            width={Math.max(chartCardWidth - 20, Math.max(chartCardWidth + 80, chartSummary.movementBars.length * 44))}
+                            xAxisColor={borderColor}
+                            yAxisColor={borderColor}
+                            xAxisLabelTextStyle={{ ...axisLabelTextStyle, textAlign: 'center' }}
+                            yAxisTextStyle={axisLabelTextStyle}
+                            xAxisTextNumberOfLines={2}
+                            xAxisLabelsHeight={36}
+                            width={getBarChartLayout(chartSummary.movementBars.length, 10, chartCardWidth + extraChartRightSpace).width}
                           />
                         </ScrollView>
                         <ThemedText style={{ color: '#cbd5e1', fontSize: 11, marginTop: 10, marginBottom: 4 }}>Flujo mensual (mayor entre ingresos/egresos)</ThemedText>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true} scrollEnabled={true}>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          nestedScrollEnabled={true}
+                          scrollEnabled={true}
+                          contentContainerStyle={{ paddingRight: 24 }}
+                        >
                           <BarChart
                             data={chartSummary.monthlyFlowBars}
                             barWidth={10}
-                            spacing={12}
+                            spacing={getBarChartLayout(chartSummary.monthlyFlowBars.length, 10, chartCardWidth + extraChartRightSpace).spacing}
                             roundedTop
                             hideRules
                             noOfSections={4}
                             yAxisThickness={0}
                             xAxisThickness={0}
-                            width={Math.max(chartCardWidth - 20, Math.max(chartCardWidth + 80, chartSummary.monthlyFlowBars.length * 46))}
+                            xAxisColor={borderColor}
+                            yAxisColor={borderColor}
+                            xAxisLabelTextStyle={{ ...axisLabelTextStyle, textAlign: 'center' }}
+                            yAxisTextStyle={axisLabelTextStyle}
+                            xAxisTextNumberOfLines={2}
+                            xAxisLabelsHeight={36}
+                            width={getBarChartLayout(chartSummary.monthlyFlowBars.length, 10, chartCardWidth + extraChartRightSpace).width}
                           />
                         </ScrollView>
                       </ScrollView>
                     )}
 
                     {card.key === 'weekdayActivity' && (
-                      <View style={{ marginTop: 10 }}>
-                        <ThemedText style={{ color: iconColor, fontSize: 11, marginBottom: 6 }}>
-                          Movimientos por día de semana
-                        </ThemedText>
-                        <BarChart
-                          data={chartSummary.weekdayActivityBars}
-                          barWidth={18}
-                          spacing={16}
-                          roundedTop
-                          hideRules
-                          noOfSections={4}
-                          yAxisThickness={0}
-                          xAxisThickness={0}
-                          width={chartCardWidth - 44}
-                        />
-                      </View>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true} style={{ marginTop: 10 }}>
+                        <View style={{ minWidth: Math.max(chartCardWidth + 30, chartSummary.weekdayActivityBars.length * 64) }}>
+                          <ThemedText style={{ color: iconColor, fontSize: 11, marginBottom: 6 }}>
+                            Movimientos por día de semana
+                          </ThemedText>
+                          <BarChart
+                            data={chartSummary.weekdayActivityBars}
+                            barWidth={18}
+                            spacing={getBarChartLayout(chartSummary.weekdayActivityBars.length, 18, chartCardWidth + 40, 20).spacing}
+                            roundedTop
+                            hideRules
+                            noOfSections={4}
+                            yAxisThickness={0}
+                            xAxisThickness={0}
+                            xAxisColor={borderColor}
+                            yAxisColor={borderColor}
+                            xAxisLabelTextStyle={{ ...axisLabelTextStyle, textAlign: 'center' }}
+                            yAxisTextStyle={axisLabelTextStyle}
+                            xAxisTextNumberOfLines={2}
+                            xAxisLabelsHeight={30}
+                            width={getBarChartLayout(chartSummary.weekdayActivityBars.length, 18, chartCardWidth + 40, 20).width}
+                          />
+                        </View>
+                      </ScrollView>
                     )}
 
                     {card.key === 'amountRanges' && (
-                      <View style={{ marginTop: 10 }}>
-                        <ThemedText style={{ color: iconColor, fontSize: 11, marginBottom: 6 }}>
-                          Cuántas transacciones caen en cada rango
-                        </ThemedText>
-                        <BarChart
-                          data={chartSummary.amountRangeBars}
-                          barWidth={20}
-                          spacing={35}
-                          roundedTop
-                          hideRules
-                          noOfSections={4}
-                          yAxisThickness={0}
-                          xAxisThickness={0}
-                          width={chartCardWidth - 35}
-                        />
-                      </View>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true} style={{ marginTop: 10 }}>
+                        <View style={{ minWidth: Math.max(chartCardWidth + 40, chartSummary.amountRangeBars.length * 80) }}>
+                          <ThemedText style={{ color: iconColor, fontSize: 11, marginBottom: 6 }}>
+                            Cuántas transacciones caen en cada rango
+                          </ThemedText>
+                          <BarChart
+                            data={chartSummary.amountRangeBars}
+                            barWidth={20}
+                            spacing={getBarChartLayout(chartSummary.amountRangeBars.length, 20, chartCardWidth + 60, 22).spacing}
+                            roundedTop
+                            hideRules
+                            noOfSections={4}
+                            yAxisThickness={0}
+                            xAxisThickness={0}
+                            xAxisColor={borderColor}
+                            yAxisColor={borderColor}
+                            xAxisLabelTextStyle={{ ...axisLabelTextStyle, textAlign: 'center' }}
+                            yAxisTextStyle={axisLabelTextStyle}
+                            xAxisTextNumberOfLines={2}
+                            xAxisLabelsHeight={30}
+                            width={getBarChartLayout(chartSummary.amountRangeBars.length, 20, chartCardWidth + 60, 22).width}
+                          />
+                        </View>
+                      </ScrollView>
                     )}
 
                     {card.key === 'pieType' && (
@@ -1417,8 +1636,10 @@ export default function HistorialScreen() {
                           startFillColor="#6366f1"
                           endFillColor="#6366f100"
                           yAxisThickness={0}
-                          xAxisColor="transparent"
-                          yAxisColor="transparent"
+                          xAxisColor={borderColor}
+                          yAxisColor={borderColor}
+                          xAxisLabelTextStyle={axisLabelTextStyle}
+                          yAxisTextStyle={axisLabelTextStyle}
                           noOfSections={4}
                           width={Math.max(chartCardWidth - 30, chartSummary.cumulativeLineData.length * 48)}
                         />
@@ -1435,8 +1656,10 @@ export default function HistorialScreen() {
                           dataPointsColor="#67e8f9"
                           curved
                           yAxisThickness={0}
-                          xAxisColor="transparent"
-                          yAxisColor="transparent"
+                          xAxisColor={borderColor}
+                          yAxisColor={borderColor}
+                          xAxisLabelTextStyle={axisLabelTextStyle}
+                          yAxisTextStyle={axisLabelTextStyle}
                           noOfSections={4}
                           width={Math.max(chartCardWidth - 20, Math.max(chartCardWidth + 100, chartSummary.trendLineData.length * 56))}
                         />

@@ -6,17 +6,17 @@ import { useFocusEffect } from 'expo-router/react-navigation';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Alert,
-    BackHandler,
-    FlatList,
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  BackHandler,
+  FlatList,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
@@ -186,7 +186,7 @@ type CalendarItem = {
   amount: number;
   date: Date;
   category: string;
-  source: 'gasto_recurrente' | 'ingreso_recurrente';
+  source: 'gasto_recurrente' | 'ingreso_recurrente' | 'transaccion';
 };
 
 type LeakTransaction = {
@@ -335,7 +335,9 @@ export default function AppsScreen() {
   const [emergencyPlanMonths, setEmergencyPlanMonths] = useState('12');
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringRecord[]>([]);
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringRecord[]>([]);
+  const [calendarTransactions, setCalendarTransactions] = useState<any[]>([]);
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
+  const [calendarColorModeEnabled, setCalendarColorModeEnabled] = useState(true);
   const [subscriptionActive, setSubscriptionActive] = useState(false);
   const [showToolOrderModal, setShowToolOrderModal] = useState(false);
   const [toolCardsConfig, setToolCardsConfig] = useState<ToolCardConfig[]>(TOOL_CARDS_CONFIG_DEFAULT);
@@ -503,6 +505,7 @@ export default function AppsScreen() {
     if (!uid) {
       setRecurringExpenses([]);
       setRecurringIncomes([]);
+      setCalendarTransactions([]);
       return;
     }
 
@@ -525,11 +528,56 @@ export default function AppsScreen() {
       setRecurringIncomes(rows);
     });
 
+    const transactionsRef = collection(db, `users/${uid}/transacciones`);
+    const unsubTransactions = onSnapshot(transactionsRef, (snap) => {
+      const rows = snap.docs.map((d) => {
+        const data = d.data() as any;
+        const parsedDate = data?.fecha?.toDate?.() || (data?.fecha ? new Date(data.fecha) : null);
+        return {
+          id: d.id,
+          tipo: String(data?.tipo || 'egreso'),
+          monto: Math.max(Number(data?.monto || 0), 0),
+          fecha: parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
+          date: parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
+          descripcion: data?.descripcion || 'Movimiento',
+          presupuestoCategoria: data?.presupuestoCategoria || 'Sin categoría',
+        };
+      });
+      setCalendarTransactions(rows);
+    });
+
     return () => {
       unsubExpenses();
       unsubIncomes();
+      unsubTransactions();
     };
   }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+
+    const key = `konta.apps.calendarColorMode.${uid}`;
+    const loadCalendarSetting = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw !== null) {
+          setCalendarColorModeEnabled(JSON.parse(raw));
+        }
+      } catch (error) {
+        console.log('No se pudo cargar la configuracion del calendario:', error);
+      }
+    };
+
+    loadCalendarSetting();
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+    const key = `konta.apps.calendarColorMode.${uid}`;
+    AsyncStorage.setItem(key, JSON.stringify(calendarColorModeEnabled)).catch((error) => {
+      console.log('No se pudo guardar la configuracion del calendario:', error);
+    });
+  }, [calendarColorModeEnabled, uid]);
 
   useEffect(() => {
     if (!uid) return;
@@ -619,11 +667,36 @@ export default function AppsScreen() {
     const month = selectedCalendarDate.getMonth();
 
     const items: CalendarItem[] = [];
+    const transactionKeyMap = new Set<string>();
+
+    for (const tx of calendarTransactions) {
+      const date = tx?.date || tx?.fecha || null;
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) continue;
+      if (date.getFullYear() !== year || date.getMonth() !== month) continue;
+
+      const normalizedAmount = Math.round(Math.max(Number(tx?.monto || 0), 0) * 100);
+      const type = tx?.tipo === 'ingreso' ? 'ingreso' : 'egreso';
+      const key = `${date.toISOString().slice(0, 10)}|${type}|${normalizedAmount}`;
+      transactionKeyMap.add(key);
+
+      items.push({
+        id: `tx-${tx.id}`,
+        title: tx?.descripcion || 'Movimiento',
+        type,
+        amount: Math.max(Number(tx?.monto || 0), 0),
+        date,
+        category: tx?.presupuestoCategoria || 'General',
+        source: 'transaccion',
+      });
+    }
 
     for (const expense of recurringExpenses) {
       const day = Number(expense.diaPago || 0);
       if (day <= 0) continue;
       const date = getDateInMonthByDay(year, month, day);
+      const amount = Math.round(Math.max(Number(expense.monto || 0), 0) * 100);
+      const key = `${date.toISOString().slice(0, 10)}|egreso|${amount}`;
+      if (transactionKeyMap.has(key)) continue;
 
       items.push({
         id: `egreso-${expense.id}`,
@@ -640,6 +713,9 @@ export default function AppsScreen() {
       const day = Number(income.diaPago || 0);
       if (day <= 0) continue;
       const date = getDateInMonthByDay(year, month, day);
+      const amount = Math.round(Math.max(Number(income.monto || 0), 0) * 100);
+      const key = `${date.toISOString().slice(0, 10)}|ingreso|${amount}`;
+      if (transactionKeyMap.has(key)) continue;
 
       items.push({
         id: `ingreso-${income.id}`,
@@ -654,7 +730,71 @@ export default function AppsScreen() {
 
     items.sort((a, b) => a.date.getTime() - b.date.getTime());
     return items;
+  }, [calendarColorModeEnabled, calendarTransactions, recurringExpenses, recurringIncomes, selectedCalendarDate]);
+
+  const agendaScheduledItems = useMemo(() => {
+    const year = selectedCalendarDate.getFullYear();
+    const month = selectedCalendarDate.getMonth();
+    const items: CalendarItem[] = [];
+
+    for (const expense of recurringExpenses) {
+      const day = Number(expense.diaPago || 0);
+      if (day <= 0) continue;
+      const date = getDateInMonthByDay(year, month, day);
+      items.push({
+        id: `agenda-egreso-${expense.id}`,
+        title: expense.nombre || 'Gasto recurrente',
+        type: 'egreso',
+        amount: Math.max(Number(expense.monto || 0), 0),
+        date,
+        category: expense.categoria || 'General',
+        source: 'gasto_recurrente',
+      });
+    }
+
+    for (const income of recurringIncomes) {
+      const day = Number(income.diaPago || 0);
+      if (day <= 0) continue;
+      const date = getDateInMonthByDay(year, month, day);
+      items.push({
+        id: `agenda-ingreso-${income.id}`,
+        title: income.nombre || 'Ingreso recurrente',
+        type: 'ingreso',
+        amount: Math.max(Number(income.monto || 0), 0),
+        date,
+        category: income.categoria || 'Ingreso',
+        source: 'ingreso_recurrente',
+      });
+    }
+
+    items.sort((a, b) => a.date.getTime() - b.date.getTime());
+    return items;
   }, [recurringExpenses, recurringIncomes, selectedCalendarDate]);
+
+  const agendaTransactionItems = useMemo<CalendarItem[]>(() => {
+    const year = selectedCalendarDate.getFullYear();
+    const month = selectedCalendarDate.getMonth();
+    const items: CalendarItem[] = [];
+
+    for (const tx of calendarTransactions) {
+      const date = tx?.date || tx?.fecha || null;
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) continue;
+      if (date.getFullYear() !== year || date.getMonth() !== month) continue;
+
+      items.push({
+        id: `agenda-tx-${tx.id}`,
+        title: tx?.descripcion || 'Movimiento',
+        type: tx?.tipo === 'ingreso' ? 'ingreso' : 'egreso',
+        amount: Math.max(Number(tx?.monto || 0), 0),
+        date,
+        category: tx?.presupuestoCategoria || 'General',
+        source: 'transaccion',
+      });
+    }
+
+    items.sort((a, b) => a.date.getTime() - b.date.getTime());
+    return items;
+  }, [calendarTransactions, selectedCalendarDate]);
 
   const calendarSummary = useMemo(() => {
     let ingresos = 0;
@@ -683,11 +823,15 @@ export default function AppsScreen() {
       if (item.date.getFullYear() !== year || item.date.getMonth() !== month) continue;
 
       const day = item.date.getDate();
-      const current = marksByDay.get(day) || { hasIncome: false, hasExpense: false, count: 0 };
+      const current = marksByDay.get(day) || { hasIncome: false, hasExpense: false, count: 0, net: 0, income: 0, expense: 0 };
+      const nextNet = item.type === 'ingreso' ? current.net + item.amount : current.net - item.amount;
       marksByDay.set(day, {
         hasIncome: current.hasIncome || item.type === 'ingreso',
         hasExpense: current.hasExpense || item.type === 'egreso',
         count: current.count + 1,
+        net: nextNet,
+        income: current.income + (item.type === 'ingreso' ? item.amount : 0),
+        expense: current.expense + (item.type === 'egreso' ? item.amount : 0),
       });
     }
 
@@ -1681,7 +1825,17 @@ export default function AppsScreen() {
   const renderCalendarTool = () => (
     <>
       <ThemedText style={[styles.sheetTitle, { color: textColor }]}>Calendario de pagos</ThemedText>
-      <ThemedText style={[styles.sheetSubtitle, { color: `${textColor}A3` }]}>Proximos 30 dias de ingresos y cargos programados.</ThemedText>
+      <ThemedText style={[styles.sheetSubtitle, { color: `${textColor}A3` }]}>Calendario activo con movimientos reales y recurrentes.</ThemedText>
+
+      <View style={[styles.toggleRow, { marginBottom: 12, justifyContent: 'space-between' }]}> 
+        <Text style={[styles.inputLabel, { color: `${textColor}9A`, marginBottom: 0 }]}>Colorear días por movimientos</Text>
+        <Switch
+          value={calendarColorModeEnabled}
+          onValueChange={setCalendarColorModeEnabled}
+          thumbColor={calendarColorModeEnabled ? primaryColor : '#9ca3af'}
+          trackColor={{ false: `${textColor}33`, true: `${primaryColor}55` }}
+        />
+      </View>
 
       <View style={[styles.resultCard, { backgroundColor: cardsMain, borderColor }]}> 
         {renderResultRow('Ingresos programados', formatCurrency(calendarSummary.ingresos), true)}
@@ -1726,23 +1880,39 @@ export default function AppsScreen() {
               selectedCalendarDate.getMonth() === today.getMonth() &&
               selectedCalendarDate.getFullYear() === today.getFullYear();
 
+            const mark = cell.mark;
+            const hasMovement = calendarColorModeEnabled && Boolean(mark);
+            const net = mark?.net ?? 0;
+            const totalAmount = Math.max(mark?.income ?? 0, mark?.expense ?? 0);
+            const alpha = totalAmount > 0 ? Math.min(0.88, 0.18 + Math.min(0.7, totalAmount / 5000)) : 0.12;
+            const dayColor = net >= 0 ? `rgba(16, 185, 129, ${alpha})` : `rgba(239, 68, 68, ${alpha})`;
+            const textColorForDay = isToday ? primaryColor : net >= 0 ? '#10b981' : '#ef4444';
+
             return (
               <View
                 key={cell.key}
                 style={[
                   styles.calendarDayCell,
-                  isToday ? [styles.calendarDayCellToday, { borderColor: `${primaryColor}66`, backgroundColor: `${primaryColor}1A` }] : null,
+                  hasMovement ? { backgroundColor: dayColor, borderColor: net >= 0 ? 'rgba(16,185,129,0.45)' : 'rgba(239,68,68,0.45)' } : null,
+                  isToday && !calendarColorModeEnabled ? [styles.calendarDayCellToday, { borderColor: `${primaryColor}66`, backgroundColor: `${primaryColor}1A` }] : null,
                 ]}
               >
                 <Text
                   style={[
                     styles.calendarDayNumber,
-                    { color: isToday ? primaryColor : textColor },
+                    { color: isToday ? primaryColor : textColorForDay },
                     isToday ? styles.calendarDayNumberToday : null,
                   ]}
                 >
                   {cell.day}
                 </Text>
+
+                {hasMovement && (
+                  <Text style={{ fontSize: 8, fontWeight: '800', color: net >= 0 ? '#0f766e' : '#7f1d1d', marginTop: 2 }}>
+                    {net >= 0 ? `+${formatCurrency(net)}` : `-${formatCurrency(Math.abs(net))}`}
+                  </Text>
+                )}
+
                 {cell.mark ? (
                   <View style={styles.calendarMarkersRow}>
                     {cell.mark.hasExpense ? <View style={[styles.calendarMarkerDot, { backgroundColor: '#f59e0b' }]} /> : null}
@@ -1768,38 +1938,58 @@ export default function AppsScreen() {
 
       <ThemedText style={[styles.sectionTitle, { color: textColor }]}>Agenda</ThemedText>
 
-      {calendarItems.length === 0 ? (
-        <View style={[styles.emptyCard, { backgroundColor: cardsMain, borderColor }]}> 
-          <Text style={[styles.emptyCardTitle, { color: textColor }]}>No hay movimientos en los proximos 30 dias.</Text>
-          <Text style={[styles.emptyCardSubtitle, { color: `${textColor}98` }]}>Activa ingresos o gastos recurrentes para verlos aqui.</Text>
-        </View>
-      ) : (
-        <View style={styles.calendarListWrap}>
-          {calendarItems.map((item) => {
-            const isIncome = item.type === 'ingreso';
-            const badgeColor = isIncome ? '#10b981' : '#f59e0b';
-            const dateLabel = item.date.toLocaleDateString('es-MX', {
-              weekday: 'short',
-              day: 'numeric',
-              month: 'short',
-            });
-
-            return (
-              <View key={item.id} style={[styles.calendarCard, { backgroundColor: cardsMain, borderColor }]}>
-                <View style={styles.calendarRowTop}>
-                  <Text style={[styles.calendarTitle, { color: textColor }]}>{item.title}</Text>
-                  <Text style={[styles.calendarBadge, { color: badgeColor }]}>{isIncome ? 'Ingreso' : 'Cargo'}</Text>
-                </View>
-
-                <View style={styles.calendarRowBottom}>
-                  <Text style={[styles.calendarMeta, { color: `${textColor}A0` }]}>{dateLabel} · {item.category}</Text>
-                  <Text style={[styles.calendarAmount, { color: isIncome ? '#10b981' : textColor }]}>{formatCurrency(item.amount)}</Text>
-                </View>
+      {(() => {
+        const renderAgendaList = (title: string, items: CalendarItem[]) => (
+          <View style={{ marginBottom: 18 }}>
+            <Text style={[styles.calendarAgendaTitle, { color: textColor }]}>{title}</Text>
+            {items.length === 0 ? (
+              <View style={[styles.emptyCard, { backgroundColor: cardsMain, borderColor }]}> 
+                <Text style={[styles.emptyCardTitle, { color: textColor }]}>
+                  {title === 'Programadas' ? 'No hay movimientos programados.' : 'No hay transacciones en este mes.'}
+                </Text>
+                <Text style={[styles.emptyCardSubtitle, { color: `${textColor}98` }]}>
+                  {title === 'Programadas'
+                    ? 'Añade pagos o ingresos recurrentes para que aparezcan aquí.'
+                    : 'Tus movimientos reales aparecerán aquí cuando los registres.'}
+                </Text>
               </View>
-            );
-          })}
-        </View>
-      )}
+            ) : (
+              <View style={styles.calendarListWrap}>
+                {items.map((item) => {
+                  const isIncome = item.type === 'ingreso';
+                  const badgeColor = isIncome ? '#10b981' : '#f59e0b';
+                  const dateLabel = item.date.toLocaleDateString('es-MX', {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'short',
+                  });
+
+                  return (
+                    <View key={item.id} style={[styles.calendarCard, { backgroundColor: cardsMain, borderColor }]}>
+                      <View style={styles.calendarRowTop}>
+                        <Text style={[styles.calendarTitle, { color: textColor }]}>{item.title}</Text>
+                        <Text style={[styles.calendarBadge, { color: badgeColor }]}>{isIncome ? 'Ingreso' : 'Cargo'}</Text>
+                      </View>
+
+                      <View style={styles.calendarRowBottom}>
+                        <Text style={[styles.calendarMeta, { color: `${textColor}A0` }]}>{dateLabel} · {item.category}</Text>
+                        <Text style={[styles.calendarAmount, { color: isIncome ? '#10b981' : textColor }]}>{formatCurrency(item.amount)}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        );
+
+        return (
+          <>
+            {renderAgendaList('Programadas', agendaScheduledItems)}
+            {renderAgendaList('Transacciones', agendaTransactionItems)}
+          </>
+        );
+      })()}
     </>
   );
 
@@ -2460,6 +2650,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontWeight: '800',
+  },
+  calendarAgendaTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 8,
   },
   calendarBadge: {
     fontSize: 12,

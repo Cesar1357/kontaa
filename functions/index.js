@@ -243,54 +243,6 @@ async function sendPushNotification(pushTokens, title, body, data = {}) {
   return results.some(result => result); // Retorna true si al menos una se envió
 }
 
-/**
- * Endpoint de prueba para enviar un push remoto al usuario especificado.
- * Útil para validar que el token y las credenciales de Expo/FCM están configuradas.
- */
-exports.sendTestPush = functions.https.onRequest(async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(204).send('');
-  }
-
-  const uid = req.query.uid || req.body?.uid;
-  if (!uid) {
-    return res.status(400).json({ error: 'Missing uid parameter' });
-  }
-
-  try {
-    const pushTokens = await getEnabledPushTokens(uid);
-
-    if (pushTokens.length === 0) {
-      return res.status(404).json({ error: 'User has no enabled devices with push tokens' });
-    }
-
-    const title = 'Hola';
-    const body = 'Sigues ahí?';
-
-    const sent = await sendPushNotification(pushTokens, title, body, {
-      type: 'test',
-      source: 'remote-test',
-    });
-
-    if (!sent) {
-      return res.status(500).json({ error: 'Failed to send push notification' });
-    }
-
-    return res.status(200).json({ success: true });
-  } catch (error) {
-    console.error('Error en sendTestPush:', error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-/**
- * Verifica diariamente si hay ahorros sin movimientos y envía notificaciones
- * Se ejecuta a las 10:00 AM cada día
- */
 exports.notifyAhorrosSinMovimientos = functions.scheduler
   .onSchedule(
     {
@@ -772,7 +724,7 @@ exports.notifyMetaAhorroCompleta = functions.firestore
 exports.notifyPresupuestosDiarios = functions.scheduler
   .onSchedule(
     {
-      schedule: '0 * * * *', // Cada hora
+      schedule: '0 19 * * *', // Cada hora
       timeZone: 'America/Mexico_City',
     },
     async (context) => {

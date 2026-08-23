@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 type LeakItem = {
@@ -101,8 +101,10 @@ export default function FugasGastoCard() {
         elevation: 5,
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-        <Ionicons name="water-outline" size={18} color={primaryColor} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+        <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: `${primaryColor}18`, alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name="water-outline" size={18} color={primaryColor} />
+        </View>
         <ThemedText style={{ marginLeft: 8, fontSize: 15, fontWeight: '700' }}>Top fugas de gasto</ThemedText>
       </View>
 
@@ -112,8 +114,22 @@ export default function FugasGastoCard() {
         <ThemedText style={{ fontSize: 12, opacity: 0.82 }}>No se detectaron aumentos de gasto relevantes.</ThemedText>
       ) : (
         leaks.map((item) => (
-          <View key={item.category} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <ThemedText style={{ fontSize: 12, opacity: 0.88 }}>{item.category}</ThemedText>
+          <View
+            key={item.category}
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingVertical: 8,
+              paddingHorizontal: 10,
+              borderRadius: 10,
+              backgroundColor: 'rgba(239,68,68,0.06)',
+              borderWidth: 1,
+              borderColor: 'rgba(239,68,68,0.12)',
+              marginBottom: 6,
+            }}
+          >
+            <ThemedText style={{ fontSize: 12, opacity: 0.88, flexShrink: 1 }}>{item.category}</ThemedText>
             <ThemedText style={{ fontSize: 12, fontWeight: '700', color: '#ef4444' }}>
               +${item.delta.toFixed(0)} ({item.growth.toFixed(0)}%)
             </ThemedText>

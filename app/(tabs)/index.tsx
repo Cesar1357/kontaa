@@ -84,6 +84,11 @@ const ONBOARDING_STEPS = [
     description: 'Me presento, mi nombre es César Alnair, tengo 18 años y estoy por entrar a la universidad. Empecé esta app para poder tener control sobre mis finanzas. Pero ahora quiero que todos puedan beneficiarse. Tu apoyo me ayudaría muchísimo a mi economía, y a cambio, prometo traer actualizaciones de vez en cuando.',
   },
   {
+    icon: 'gift-outline' as const,
+    title: 'Prueba gratis de 7 días',
+    description: 'Prueba todas las funciones premium gratis durante 7 días, al completar una racha de 3 días.',
+  },
+  {
     icon: 'heart-outline' as const,
     title: 'Suscripcion de apoyo',
     description: 'Desde 10 pesos mensuales. Todas las suscripciones tienen los mismos beneficios. Sin suscripción, funciones personalizadas quedan limitadas a 2 elementos.',
@@ -118,6 +123,7 @@ export default function Inicio() {
   });
   const [celebrationVisible, setCelebrationVisible] = useState(false);
   const [celebrationMessage, setCelebrationMessage] = useState('');
+  const [celebrationAction, setCelebrationAction] = useState<{ label: string; onPress: () => void } | null>(null);
   const [cardPulse, setCardPulse] = useState(false);
   const [isGamificationExpanded, setIsGamificationExpanded] = useState(true);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -137,6 +143,7 @@ export default function Inicio() {
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [subscriptionActive, setSubscriptionActive] = useState<boolean | null>(null);
   const [subscriptionLoaded, setSubscriptionLoaded] = useState<boolean | null>(null);
+  const [trialOfferClaimed, setTrialOfferClaimed] = useState(false);
   const [sendingVerification, setSendingVerification] = useState(false);
   const handledWidgetActionRef = useRef<Set<string>>(new Set());
 
@@ -236,6 +243,9 @@ export default function Inicio() {
     const unsub = onSnapshot(userRef, (snap) => {
       const data = snap.data() || {};
       const support = (data as any).supportSubscription;
+      const trialOfferData = (data as any).trialOffer || null;
+      const claimed = Boolean(trialOfferData?.claimedAt || trialOfferData?.status === 'claimed');
+      setTrialOfferClaimed(claimed || Boolean(support?.active));
       if (support?.active !== undefined) {
         setSubscriptionActive(Boolean(support?.active));
         setSubscriptionLoaded(true);
@@ -712,6 +722,12 @@ export default function Inicio() {
     router.push({ pathname: '/(screens)/Settings', params: { openSubscription: '1' } });
   };
 
+  const handleOpenTrialOffer = () => {
+    setCelebrationVisible(false);
+    setCelebrationAction(null);
+    router.push({ pathname: '/(screens)/Settings', params: { openSubscription: '1' } });
+  };
+
   const handleOpenInstagram = async () => {
     try {
       await Linking.openURL('instagram://user?username=emperblack');
@@ -989,9 +1005,9 @@ export default function Inicio() {
 
             {isGamificationExpanded && (
               <>
-                <ThemedView style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, backgroundColor: cardMainColor }}>
+                <ThemedView style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, backgroundColor: cardMainColor, flexShrink: 1 }}>
                   <Ionicons name="flame" size={20} color={primaryColor} />
-                  <ThemedText style={{ marginLeft: 8, fontSize: 14, fontWeight: '600' }}>{streakInfo.message}</ThemedText>
+                  <ThemedText style={{ marginLeft: 8, fontSize: 14, fontWeight: '600', flexShrink: 1, flexWrap: 'wrap' }}>{streakInfo.message}</ThemedText>
                 </ThemedView>
 
                 <ThemedText style={{ fontSize: 12, marginBottom: 10, opacity: 0.8 }}>
@@ -1119,10 +1135,11 @@ export default function Inicio() {
         }
 
         const nextLongest = Math.max(Number(previous.longest || 0), nextCurrent);
+        const trialOfferAvailable = nextCurrent >= 3 && !subscriptionActive && !trialOfferClaimed;
         const nextMessage = nextCurrent >= 7
           ? `¡Racha de ${nextCurrent} días! Sigue así.`
-          : nextCurrent >= 3
-            ? `Racha de ${nextCurrent} días. Muy bien.`
+          : trialOfferAvailable
+            ? `Tu racha de ${nextCurrent} días te da acceso a una prueba gratis.`
             : 'Tu racha comienza hoy';
 
         const nextGoal = nextCurrent >= 7 ? 14 : nextCurrent >= 3 ? 7 : 3;
@@ -1140,12 +1157,22 @@ export default function Inicio() {
           ? `¡Perfecto! Alcanzaste ${filtered.length} movimientos esta semana.`
           : `Faltan ${weeklyTarget - filtered.length} movimientos para tu meta semanal.`;
 
-        const milestoneReached = [3, 7, 14].includes(nextCurrent) && lastMilestoneRef.current !== nextCurrent;
+        const streakMilestoneReached = nextCurrent >= 3 && lastMilestoneRef.current !== nextCurrent;
         const weeklyGoalUnlocked = weeklyTargetMet && !weeklyTargetSeenRef.current;
 
-        if (milestoneReached) {
+        if (streakMilestoneReached) {
           lastMilestoneRef.current = nextCurrent;
-          setCelebrationMessage(`¡Logro desbloqueado! Racha de ${nextCurrent} días.`);
+          const isTrialMilestone = nextCurrent >= 3;
+          setCelebrationMessage(
+            isTrialMilestone
+              ? '¡Tu prueba gratis ya está lista!'
+              : `¡Logro desbloqueado! Racha de ${nextCurrent} días.`
+          );
+          setCelebrationAction(
+            isTrialMilestone
+              ? { label: 'Ver oferta', onPress: handleOpenTrialOffer }
+              : null
+          );
           setCelebrationVisible(true);
           setCardPulse(true);
           try {
@@ -1156,6 +1183,7 @@ export default function Inicio() {
         } else if (weeklyGoalUnlocked) {
           weeklyTargetSeenRef.current = true;
           setCelebrationMessage(`¡Meta semanal cumplida! ${filtered.length} movimientos.`);
+          setCelebrationAction(null);
           setCelebrationVisible(true);
           setCardPulse(true);
           try {
@@ -1223,12 +1251,15 @@ export default function Inicio() {
         Animated.timing(celebrationAnim, {
           toValue: 0,
           duration: 240,
-          delay: 1400,
+          delay: 3000,
           useNativeDriver: true,
         }),
       ]),
       Animated.stagger(40, confettiAnimations),
-    ]).start(() => setCelebrationVisible(false));
+    ]).start(() => {
+      setCelebrationVisible(false);
+      setCelebrationAction(null);
+    });
   }, [celebrationVisible, celebrationAnim]);
 
   useEffect(() => {
@@ -1468,8 +1499,29 @@ export default function Inicio() {
                 {celebrationMessage}
               </ThemedText>
               <ThemedText style={{ fontSize: 13, opacity: 0.8, marginTop: 6, textAlign: 'center' }}>
-                Sigue así, tu próxima meta ya está cerca.
+                {celebrationAction
+                  ? 'Tienes la prueba lista para activar desde tu suscripción.'
+                  : 'Sigue así, tu próxima meta ya está cerca.'}
               </ThemedText>
+
+              {celebrationAction && (
+                <TouchableOpacity
+                  onPress={celebrationAction.onPress}
+                  style={{
+                    marginTop: 16,
+                    backgroundColor: primaryColor,
+                    borderRadius: 10,
+                    paddingVertical: 10,
+                    paddingHorizontal: 18,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+                    {celebrationAction.label}
+                  </ThemedText>
+                </TouchableOpacity>
+              )}
             </ThemedView>
           </Animated.View>
         </Animated.View>

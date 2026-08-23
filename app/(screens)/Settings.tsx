@@ -55,9 +55,10 @@ interface SettingOption {
 
 interface SupportPlan {
   amount: number;
-  offerToken: string;
+  offerToken: string | null;
   basePlanId: string | null;
   formattedPrice: string | null;
+  isTrial: boolean;
 }
 
 export default function Settings() {
@@ -74,6 +75,7 @@ export default function Settings() {
   const [checking, setChecking] = useState(true);
   const [isTextVisible, setIsTextVisible] = useState(false);
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
+  const [trialOfferClaimed, setTrialOfferClaimed] = useState(false);
   const [selectedSupportAmount, setSelectedSupportAmount] = useState<number | 'custom'>(10);
   const [customSupportAmount, setCustomSupportAmount] = useState('');
   const [processingSubscription, setProcessingSubscription] = useState(false);
@@ -85,6 +87,8 @@ export default function Settings() {
   const [sendingSuggestion, setSendingSuggestion] = useState(false);
   const [showSubscriptionThanks, setShowSubscriptionThanks] = useState(false);
   const [lastSubscribedAmount, setLastSubscribedAmount] = useState<number | null>(null);
+  const [streakCurrent, setStreakCurrent] = useState(0);
+  const [selectedOfferToken, setSelectedOfferToken] = useState<string | null>(null);
 
   // Modal References
   const modalRef = useRef<BottomSheetModal>(null);
@@ -97,6 +101,28 @@ export default function Settings() {
   const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
   const themeBg = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
+  const withAlpha = (color: string, opacity: number) => {
+    if (!color || typeof color !== 'string') return color;
+
+    const normalized = color.replace('#', '');
+    const base = normalized.length === 3
+      ? normalized.split('').map((char) => char + char).join('')
+      : normalized.length >= 8
+        ? normalized.slice(0, 6)
+        : normalized;
+
+    if (base.length !== 6) return color;
+
+    const alphaHex = Math.round(Math.min(Math.max(opacity, 0), 1) * 255)
+      .toString(16)
+      .padStart(2, '0');
+
+    return `#${base}${alphaHex}`;
+  };
+  const primarySoft = withAlpha(primaryColor, 0.08);
+  const primaryBorder = withAlpha(primaryColor, 0.35);
+  const primaryStrong = withAlpha(primaryColor, 0.55);
+  const primarySelected = withAlpha(primaryColor, 0.16);
 
   const verifyPlaySubscriptionCallable = useMemo(
   () => httpsCallableFromURL(firebaseFunctions, 'https://verifyplaysubscription-bzkc3rrioq-uc.a.run.app'),
@@ -112,6 +138,7 @@ export default function Settings() {
   const processedPurchaseKeyRef = useRef<string | null>(null);
   const purchaseFlowStartedAtRef = useRef<number>(0);
   const purchaseSuccessRef = useRef(false);
+  const purchaseFailureAlertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -214,11 +241,23 @@ export default function Settings() {
         const userDoc = await getDoc(doc(db, `users/${uid}`));
         const data = userDoc.data() || {};
         const supportData = (data as any).supportSubscription || null;
-        setSubscriptionData(supportData);
+        const trialOfferData = (data as any).trialOffer || null;
+        const claimed = Boolean(trialOfferData?.claimedAt || trialOfferData?.status === 'claimed');
+        const amount = Number(supportData?.amount ?? supportData?.pendingAmount ?? 0);
+        const activeTrialOfferToken = typeof trialOfferData?.offerToken === 'string' ? trialOfferData.offerToken : null;
 
-        const amount = Number(supportData?.amount || supportData?.pendingAmount || 0);
-        if (amount) {
-          setSelectedSupportAmount(amount);
+        setSubscriptionData(supportData);
+        setTrialOfferClaimed(claimed || Boolean(supportData?.active));
+        setStreakCurrent(Number(data?.streak?.current || 0));
+
+        if (activeTrialOfferToken) {
+          setSelectedOfferToken(activeTrialOfferToken);
+        } else if (!supportData?.active && !claimed) {
+          setSelectedOfferToken(null);
+        }
+
+        if (amount === 0 || amount > 0) {
+          setSelectedSupportAmount(amount === 0 ? 0 : amount);
           setCustomSupportAmount(String(amount));
         }
       } catch (error) {
@@ -332,6 +371,10 @@ export default function Settings() {
         }));
 
         if (wasUserInitiated) {
+          if (purchaseFailureAlertTimeoutRef.current) {
+            clearTimeout(purchaseFailureAlertTimeoutRef.current);
+            purchaseFailureAlertTimeoutRef.current = null;
+          }
           modalRef.current?.dismiss();
           setActiveModal(null);
           setLastSubscribedAmount(amount || null);
@@ -342,7 +385,16 @@ export default function Settings() {
       } catch (error) {
         console.error('Error processing Play purchase:', error);
         if (purchaseFlowActiveRef.current) {
-          Alert.alert('Error', 'No se pudo finalizar la compra con Google Play.');
+          if (purchaseFailureAlertTimeoutRef.current) {
+            clearTimeout(purchaseFailureAlertTimeoutRef.current);
+          }
+          purchaseFailureAlertTimeoutRef.current = setTimeout(() => {
+            if (purchaseSuccessRef.current) return;
+            purchaseFlowActiveRef.current = false;
+            pendingPurchaseAmountRef.current = null;
+            setProcessingSubscription(false);
+            Alert.alert('Error', 'No se pudo finalizar la compra con Google Play.');
+          }, 7000);
         }
       } finally {
         purchaseFlowActiveRef.current = false;
@@ -356,18 +408,42 @@ export default function Settings() {
       const now = Date.now();
       const code = (error as { code?: string }).code;
 
-      // En algunos dispositivos llega un error transitorio antes de que purchaseUpdatedListener termine.
-      const recentStart = now - purchaseFlowStartedAtRef.current < 4000;
       if (wasUserInitiated && purchaseSuccessRef.current) {
         return;
+      }
+
+      if (code === 'E_USER_CANCELLED') {
+        purchaseFlowActiveRef.current = false;
+        pendingPurchaseAmountRef.current = null;
+        setProcessingSubscription(false);
+        return;
+      }
+
+      if (!wasUserInitiated) return;
+
+      const recentStart = now - purchaseFlowStartedAtRef.current < 10000;
+      if (recentStart) {
+        if (purchaseFailureAlertTimeoutRef.current) {
+          clearTimeout(purchaseFailureAlertTimeoutRef.current);
+        }
+
+        purchaseFailureAlertTimeoutRef.current = setTimeout(() => {
+          if (purchaseSuccessRef.current) return;
+          purchaseFlowActiveRef.current = false;
+          pendingPurchaseAmountRef.current = null;
+          setProcessingSubscription(false);
+          Alert.alert('Compra no completada', 'No se pudo completar la suscripción en Google Play.');
+        }, 7000);
+        return;
+      }
+
+      if (purchaseFailureAlertTimeoutRef.current) {
+        clearTimeout(purchaseFailureAlertTimeoutRef.current);
       }
 
       purchaseFlowActiveRef.current = false;
       pendingPurchaseAmountRef.current = null;
       setProcessingSubscription(false);
-      if (code === 'E_USER_CANCELLED') return;
-      if (wasUserInitiated && recentStart) return;
-      if (!wasUserInitiated) return;
       Alert.alert('Compra no completada', 'No se pudo completar la suscripción en Google Play.');
     });
 
@@ -426,6 +502,10 @@ export default function Settings() {
     setupIap();
 
     return () => {
+      if (purchaseFailureAlertTimeoutRef.current) {
+        clearTimeout(purchaseFailureAlertTimeoutRef.current);
+        purchaseFailureAlertTimeoutRef.current = null;
+      }
       isMounted = false;
       purchaseSub.remove();
       errorSub.remove();
@@ -704,25 +784,56 @@ export default function Settings() {
   function getSubscriptionPlans(subscription: Subscription | undefined): SupportPlan[] {
     if (!subscription || !('subscriptionOfferDetails' in subscription)) return [];
 
-    return (subscription.subscriptionOfferDetails || [])
+    const mappedPlans: SupportPlan[] = (subscription.subscriptionOfferDetails || [])
       .map((offer) => {
-        const amount = getFormattedPlanPrice(offer);
+        const pricingPhases = offer?.pricingPhases?.pricingPhaseList || [];
+        const hasTrialPhase = pricingPhases.some((phase: any) => {
+          const priceMicros = Number(phase?.priceAmountMicros ?? 0);
+          const formattedPrice = String(phase?.formattedPrice ?? '').toLowerCase();
+          return priceMicros === 0 || formattedPrice.includes('gratis') || formattedPrice.includes('free');
+        });
+        const recurringPhase = [...pricingPhases].reverse().find((phase: any) => Number(phase?.priceAmountMicros ?? 0) > 0) || pricingPhases[0] || null;
+        const amount = hasTrialPhase ? 0 : Number(recurringPhase?.priceAmountMicros ?? 0) / 1000000;
+
         return {
           amount,
           offerToken: offer?.offerToken || null,
           basePlanId: offer?.basePlanId || null,
-          formattedPrice: offer?.pricingPhases?.pricingPhaseList?.[offer?.pricingPhases?.pricingPhaseList?.length - 1]?.formattedPrice || null,
+          formattedPrice: hasTrialPhase ? 'Prueba gratis' : recurringPhase?.formattedPrice || null,
+          isTrial: hasTrialPhase,
         };
       })
-      .filter((plan): plan is SupportPlan => Boolean(plan.offerToken) && plan.amount > 0)
-      .sort((a, b) => a.amount - b.amount);
+      .filter((plan): plan is SupportPlan => Boolean(plan.offerToken));
+
+    const seen = new Set<string>();
+    return mappedPlans
+      .filter((plan) => {
+        const key = `${plan.offerToken ?? ''}|${plan.basePlanId ?? ''}|${plan.amount}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => {
+        if (Number(a.amount) === 0 && Number(b.amount) !== 0) return -1;
+        if (Number(b.amount) === 0 && Number(a.amount) !== 0) return 1;
+        return Number(a.amount) - Number(b.amount);
+      });
   }
 
   const subscriptionProduct = availableSubscriptions.find((item) => item.productId === SUBSCRIPTION_PRODUCT_ID);
   const availableSupportPlans = useMemo(() => getSubscriptionPlans(subscriptionProduct), [subscriptionProduct]);
+  const streakTrialOffer = useMemo(() => {
+    if (!availableSupportPlans.length) return null;
+    return availableSupportPlans.find((plan) => plan.isTrial || plan.amount === 0) || null;
+  }, [availableSupportPlans]);
+
   const closestSupportPlan = useMemo(() => {
     const amount = getAmountToUse();
-    if (!amount || availableSupportPlans.length === 0) return null;
+    if (availableSupportPlans.length === 0) return null;
+
+    const freeTrialPlan = availableSupportPlans.find((plan) => plan.amount === 0);
+    if (amount === 0 && freeTrialPlan) return freeTrialPlan;
+    if (!amount || amount < 0) return null;
 
     return availableSupportPlans.reduce((closest, plan) => {
       if (!closest) return plan;
@@ -893,15 +1004,24 @@ export default function Settings() {
       return;
     }
 
+    const selectedPlan = selectedOfferToken
+      ? availableSupportPlans.find((plan) => plan.offerToken === selectedOfferToken) ?? closestSupportPlan
+      : closestSupportPlan;
+
+    const isTrialOfferSelected = Boolean(selectedOfferToken && selectedPlan && Number((selectedPlan as any)?.amount || 0) === 0);
     const amount = getAmountToUse();
-    if (!amount || amount <= 0) {
+    if (!isTrialOfferSelected && (!amount || amount <= 0)) {
       Alert.alert('Monto inválido', 'Selecciona un monto válido para continuar.');
       return;
     }
 
-    const selectedPlan = closestSupportPlan;
     if (!selectedPlan) {
       Alert.alert('Monto no disponible', 'No se encontraron planes de Google Play para esta suscripción.');
+      return;
+    }
+
+    if (!selectedPlan.offerToken) {
+      Alert.alert('Oferta no disponible', 'Esta oferta de Google Play no tiene un token válido para procesarse.');
       return;
     }
 
@@ -915,7 +1035,7 @@ export default function Settings() {
       purchaseFlowActiveRef.current = true;
       purchaseSuccessRef.current = false;
       purchaseFlowStartedAtRef.current = Date.now();
-      pendingPurchaseAmountRef.current = amount;
+      pendingPurchaseAmountRef.current = isTrialOfferSelected ? 0 : amount;
       await setDoc(
         doc(db, `users/${uid}`),
         {
@@ -930,9 +1050,21 @@ export default function Settings() {
             source: 'google_play_billing',
             updatedAt: new Date(),
           },
+          trialOffer: isTrialOfferSelected ? {
+            status: 'claimed',
+            claimedAt: new Date(),
+            offerToken: selectedPlan.offerToken,
+            source: 'streak',
+            streakDays: streakCurrent,
+          } : undefined,
         },
         { merge: true }
       );
+
+      if (purchaseFailureAlertTimeoutRef.current) {
+        clearTimeout(purchaseFailureAlertTimeoutRef.current);
+        purchaseFailureAlertTimeoutRef.current = null;
+      }
 
       await requestSubscription({
         subscriptionOffers: [
@@ -1025,6 +1157,10 @@ export default function Settings() {
     { label: 'Gris', value: 'grey' as const },
   ];
 
+  const isTrialSubscription = Boolean(
+    subscriptionData?.active && Number(subscriptionData?.amount ?? subscriptionData?.pendingAmount ?? 0) === 0
+  );
+
   const settingsOptions: SettingOption[] = [
     {
       id: 'profile',
@@ -1058,7 +1194,11 @@ export default function Settings() {
       id: 'subscription',
       title: 'Suscripción',
       icon: 'card',
-      description: subscriptionData?.active ? 'Activa en MXN' : 'Gestiona apoyo desde Google Play',
+      description: isTrialSubscription
+        ? 'Prueba gratis activa'
+        : subscriptionData?.active
+          ? 'Activa en MXN'
+          : 'Gestiona apoyo desde Google Play',
       onPress: () => openModal('subscription'),
     },
     {
@@ -1425,6 +1565,9 @@ export default function Settings() {
   const renderSubscriptionModal = () => {
     const amount = getAmountToUse();
     const isActive = Boolean(subscriptionData?.active);
+    const isTrial = Boolean(
+      isActive && Number(subscriptionData?.amount ?? subscriptionData?.pendingAmount ?? 0) === 0
+    );
     const isPending = Boolean(subscriptionData?.pending);
     const rawExpiryTime = subscriptionData?.expiryTime;
     const expiryDate = parseSubscriptionExpiryDate(rawExpiryTime);
@@ -1442,11 +1585,24 @@ export default function Settings() {
           year: 'numeric',
         })
       : null;
-    const primaryActionLabel = closestSupportPlan
-      ? selectedSupportAmount === 'custom'
-        ? `Suscribirme con ${closestSupportPlan.amount} MXN`
-        : `Suscribirme con ${amount} MXN`
-      : 'Suscribirme en Google Play';
+    const selectedTrialOffer = selectedOfferToken
+      ? availableSupportPlans.find((plan) => plan.offerToken === selectedOfferToken && Number(plan.amount || 0) === 0)
+      : null;
+    const primaryActionLabel = selectedTrialOffer
+      ? 'Activar prueba gratis'
+      : closestSupportPlan
+        ? selectedSupportAmount === 'custom'
+          ? `Suscribirme con ${closestSupportPlan.amount} MXN`
+          : `Suscribirme con ${amount} MXN`
+        : 'Suscribirme en Google Play';
+    const isSubscriptionButtonDisabled = Boolean(
+      processingSubscription
+      || syncingPlay
+      || !iapReady
+      || (!selectedOfferToken && !amount)
+      || (!selectedOfferToken && !closestSupportPlan)
+      || (selectedOfferToken && !availableSupportPlans.some((plan) => plan.offerToken === selectedOfferToken))
+    );
 
     return (
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 20 }} style={{ backgroundColor: themeBg }}>
@@ -1458,7 +1614,7 @@ export default function Settings() {
           <Text style={{ color: textColor, fontWeight: '700', marginBottom: 6 }}>Estado actual</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
             <Text style={{ color: `${textColor}cc`, fontWeight: '600', flex: 1 }}>
-              {isActive ? 'Activa' : isPending ? 'Pendiente de confirmación' : 'Sin suscripción activa'}
+              {isTrial ? 'Prueba gratis activa' : isActive ? 'Activa' : isPending ? 'Pendiente de confirmación' : 'Sin suscripción activa'}
             </Text>
             {isCanceledSubscription && (
               <View
@@ -1504,6 +1660,7 @@ export default function Settings() {
                 <TouchableOpacity
                   key={`support-${plan.amount}-${plan.basePlanId || 'base'}`}
                   onPress={() => {
+                    setSelectedOfferToken(null);
                     setSelectedSupportAmount(plan.amount);
                     setCustomSupportAmount(String(plan.amount));
                   }}
@@ -1514,8 +1671,8 @@ export default function Settings() {
                     marginRight: 8,
                     marginBottom: 8,
                     borderWidth: 1,
-                    borderColor: recommended ? '#f59e0b' : `${primaryColor}55`,
-                    backgroundColor: selected ? primaryColor : recommended ? '#f59e0b22' : `${primaryColor}16`,
+                    borderColor: recommended ? '#f59e0b' : primaryStrong,
+                    backgroundColor: selected ? primaryColor : recommended ? '#f59e0b22' : primarySelected,
                   }}
                 >
                   <Text style={{ color: selected ? '#fff' : textColor, fontWeight: '700' }}>{plan.amount} MXN</Text>
@@ -1527,7 +1684,10 @@ export default function Settings() {
             })}
 
             <TouchableOpacity
-              onPress={() => setSelectedSupportAmount('custom')}
+              onPress={() => {
+                setSelectedOfferToken(null);
+                setSelectedSupportAmount('custom');
+              }}
               style={{
                 paddingHorizontal: 12,
                 paddingVertical: 8,
@@ -1537,8 +1697,8 @@ export default function Settings() {
                 justifyContent: 'center',
                 alignItems: 'center',
                 borderWidth: 1,
-                borderColor: `${primaryColor}55`,
-                backgroundColor: selectedSupportAmount === 'custom' ? primaryColor : `${primaryColor}16`,
+                borderColor: primaryStrong,
+                backgroundColor: selectedSupportAmount === 'custom' ? primaryColor : primarySelected,
               }}
             >
               <Text style={{ color: selectedSupportAmount === 'custom' ? '#fff' : textColor, fontWeight: '700', textAlign: 'center' }}>Otro</Text>
@@ -1556,7 +1716,7 @@ export default function Settings() {
                 style={{
                   borderRadius: 8,
                   borderWidth: 1,
-                  borderColor: `${primaryColor}35`,
+                  borderColor: primaryBorder,
                   paddingHorizontal: 12,
                   paddingVertical: 10,
                   color: textColor,
@@ -1576,16 +1736,42 @@ export default function Settings() {
           </Text>
         </View>
 
+        {streakCurrent >= 3 && streakTrialOffer && !subscriptionData?.active && !trialOfferClaimed && (
+          <View style={{ backgroundColor: `${primaryColor}08`, borderRadius: 12, borderWidth: 1, borderColor: `${primaryColor}35`, padding: 14, marginBottom: 14 }}>
+            <Text style={{ color: textColor, fontWeight: '700', marginBottom: 8 }}>Prueba gratis por tu racha</Text>
+            <Text style={{ color: `${textColor}80`, fontSize: 12, lineHeight: 18 }}>
+              Tienes una oferta de prueba disponible por tu racha de {streakCurrent} días. Se activará con la oferta de Google Play configurada para esta prueba y, al terminar, el cobro empezará automáticamente.
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setSelectedOfferToken(streakTrialOffer.offerToken);
+                setSelectedSupportAmount(streakTrialOffer.amount);
+                setCustomSupportAmount(String(streakTrialOffer.amount));
+                setTrialOfferClaimed(true);
+              }}
+              style={{
+                marginTop: 12,
+                backgroundColor: primaryColor,
+                borderRadius: 8,
+                paddingVertical: 10,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700' }}>Usar oferta de prueba</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <TouchableOpacity
           onPress={handleOpenPlaySubscription}
-          disabled={processingSubscription || syncingPlay || !amount || !closestSupportPlan || !iapReady}
+          disabled={isSubscriptionButtonDisabled}
           style={{
             backgroundColor: primaryColor,
             borderRadius: 10,
             paddingVertical: 12,
             alignItems: 'center',
             marginBottom: 10,
-            opacity: processingSubscription || syncingPlay || !amount || !closestSupportPlan || !iapReady ? 0.7 : 1,
+            opacity: isSubscriptionButtonDisabled ? 0.7 : 1,
           }}
         >
           <Text style={{ color: '#fff', fontWeight: '700' }}>
@@ -1791,7 +1977,7 @@ export default function Settings() {
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, alignItems: 'center' }}>
             <Text style={{ fontSize: 11, color: `${textColor}60`, textAlign: 'center' }}>
-              v3.0.5   | 
+              v3.0.8   | 
             </Text>
             <TouchableOpacity
               onPress={handleOpenInstagram}

@@ -252,7 +252,7 @@ export default function ResumenRapido() {
         <Animated.View style={[{ width: "100%" }, animatedStyle]}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", width: "100%" }}>
             <View>
-                <ThemedText style={{ fontSize: RFValue(13), color: "#aaa", marginBottom: 4 }}>
+                <ThemedText style={{ fontSize: RFValue(13), marginBottom: 4 }}>
                 Resumen rápido
                 </ThemedText>
                 <ThemedText style={{ fontSize: RFValue(20), fontWeight: "700" }}>

@@ -180,7 +180,7 @@ export default function LogIn() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
-  backgroundDecor: { ...StyleSheet.absoluteFillObject },
+  backgroundDecor: StyleSheet.absoluteFill,
   glow: { position: 'absolute', width: 220, height: 220, borderRadius: 220 },
   scrollContent: {
     flexGrow: 1,

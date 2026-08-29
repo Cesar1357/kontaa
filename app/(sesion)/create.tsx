@@ -166,9 +166,6 @@ export default function CreateIn() {
       >
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Animated.View style={{ opacity: heroOpacity, transform: [{ translateY: heroTranslate }], width: '100%' }}>
-            <View style={[styles.badge, { backgroundColor: `${primaryColor}16`, borderColor: `${primaryColor}25` }]}>
-              <Text style={[styles.badgeText, { color: primaryColor }]}>Empieza con orden y claridad</Text>
-            </View>
             <Text style={[styles.brand, { color: textColor }]}>Konta</Text>
             <Text style={[styles.headline, { color: textColor }]}>Crea tu cuenta y toma control de tu dinero.</Text>
           </Animated.View>

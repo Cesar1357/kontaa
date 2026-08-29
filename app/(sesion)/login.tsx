@@ -3,18 +3,18 @@ import { router } from 'expo-router';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    Easing,
-    KeyboardAvoidingView,
-    Linking,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -108,9 +108,6 @@ export default function LogIn() {
       >
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Animated.View style={{ opacity: heroOpacity, transform: [{ translateY: heroTranslate }], width: '100%' }}>
-            <View style={[styles.badge, { backgroundColor: `${primaryColor}16`, borderColor: `${primaryColor}25` }]}>
-              <Text style={[styles.badgeText, { color: primaryColor }]}>Finanzas claras desde el primer minuto</Text>
-            </View>
             <Text style={[styles.brand, { color: textColor }]}>Konta</Text>
             <Text style={[styles.headline, { color: textColor }]}>Bienvenido de vuelta.</Text>
           </Animated.View>

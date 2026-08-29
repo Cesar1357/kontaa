@@ -1,4 +1,5 @@
 import { HapticTab } from '@/components/HapticTab';
+import { useAppTheme } from '@/hooks/ThemeContext';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Tabs } from 'expo-router';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -10,6 +11,7 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const tabBarBackground = useThemeColor({ light: '#FFFFFF', dark: '#111827' }, 'cardsMain');
   const tabBarInactive = useThemeColor({ light: '#9CA3AF', dark: '#6B7280' }, 'icon');
+  const { savingsViewMode } = useAppTheme();
 
   return (
         <Tabs
@@ -52,7 +54,9 @@ export default function TabLayout() {
           <Tabs.Screen
             name="AhorrosScreen"
             options={{
-              tabBarIcon: ({ color }) => <Ionicons name="cash" size={27} color={color} />,
+              tabBarIcon: ({ color }) => (
+                <Ionicons name={savingsViewMode === 'cripto' ? 'logo-bitcoin' : 'wallet'} size={27} color={color} />
+              ),
             }}
           />
           <Tabs.Screen

@@ -15,7 +15,7 @@ import {
   StyleSheet,
   ToastAndroid,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 import { StatusBar } from 'expo-status-bar';
@@ -41,6 +41,7 @@ import QuickAccessPanel from '@/components/QuickAccessPanel';
 import ResumenRapido from '@/components/ResumenRapido';
 import RiesgoPresupuestoCard from '@/components/RiesgoPresupuestoCard';
 import SaludFinancieraCard from '@/components/SaludFinancieraCard';
+import CryptoPortfolioCard from '../../components/CryptoPortfolioCard';
 
 
 const HOME_SECTIONS_DEFAULT: HomeSectionKey[] = [
@@ -48,6 +49,7 @@ const HOME_SECTIONS_DEFAULT: HomeSectionKey[] = [
   'favorite-charts',
   'weekly',
   'health',
+  'crypto-portfolio',
   'upcoming',
   'budget-risk',
   'leaks',
@@ -130,6 +132,7 @@ export default function Inicio() {
   const [preestablecidosRapidos, setPreestablecidosRapidos] = useState<any[]>([]);
   const [historialTransactions, setHistorialTransactions] = useState<any[]>([]);
   const [favoriteCharts, setFavoriteCharts] = useState<Array<{ key: HistorialChartKey; title: string; subtitle?: string }>>([]);
+  const [cryptoPortfolioSummary, setCryptoPortfolioSummary] = useState<any[]>([]);
   const [prefillTransaccion, setPrefillTransaccion] = useState<any | null>(null);
   const [quickActionTick, setQuickActionTick] = useState(0);
   const [quickAccessPromoDismissed, setQuickAccessPromoDismissed] = useState(false);
@@ -1072,6 +1075,9 @@ export default function Inicio() {
     }
 
     if (section === 'health') return <SaludFinancieraCard />;
+    if (section === 'crypto-portfolio') {
+      return <CryptoPortfolioCard holdings={cryptoPortfolioSummary} />;
+    }
     if (section === 'upcoming') return <ProximosRecurrentesCard />;
     if (section === 'budget-risk') return <RiesgoPresupuestoCard />;
     if (section === 'leaks') return <FugasGastoCard />;
@@ -1081,6 +1087,39 @@ export default function Inicio() {
     if (section === 'compare') return <CardComparativa />;
     return null;
   };
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const loadCryptoPortfolioSummary = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'users', user.uid, 'criptos'));
+        const items = snap.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }));
+        if (Array.isArray(items) && items.length > 0) {
+          setCryptoPortfolioSummary(items);
+          return;
+        }
+      } catch (error) {
+        console.error('Error cargando portafolio cripto desde Firestore:', error);
+      }
+
+      try {
+        const raw = await AsyncStorage.getItem('@kontaa:crypto-portfolio');
+        if (!raw) {
+          setCryptoPortfolioSummary([]);
+          return;
+        }
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setCryptoPortfolioSummary(parsed);
+        }
+      } catch (error) {
+        console.error('Error cargando portafolio cripto desde local:', error);
+      }
+    };
+
+    loadCryptoPortfolioSummary();
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) return;

@@ -10,6 +10,7 @@ export type HomeSectionKey =
   | 'favorite-charts'
   | 'weekly'
   | 'health'
+  | 'crypto-portfolio'
   | 'upcoming'
   | 'budget-risk'
   | 'leaks'
@@ -27,6 +28,7 @@ export const HOME_SECTIONS_CONFIG_DEFAULT: HomeSectionConfig[] = [
   { key: 'favorite-charts', visible: true },
   { key: 'weekly', visible: true },
   { key: 'health', visible: true },
+  { key: 'crypto-portfolio', visible: true },
   { key: 'upcoming', visible: true },
   { key: 'budget-risk', visible: true },
   { key: 'leaks', visible: true },
@@ -41,6 +43,7 @@ const SECTION_LABELS: Record<HomeSectionKey, string> = {
   'quick-access': 'Accesos rápidos',
   weekly: 'Racha y resumen',
   health: 'Salud financiera semanal',
+  'crypto-portfolio': 'Portafolio cripto',
   upcoming: 'Próximos recurrentes',
   'budget-risk': 'Riesgo de presupuesto',
   leaks: 'Top fugas de gasto',

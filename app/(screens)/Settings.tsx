@@ -1977,7 +1977,7 @@ export default function Settings() {
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, alignItems: 'center' }}>
             <Text style={{ fontSize: 11, color: `${textColor}60`, textAlign: 'center' }}>
-              v3.0.8   | 
+              v4.0.0   | 
             </Text>
             <TouchableOpacity
               onPress={handleOpenInstagram}

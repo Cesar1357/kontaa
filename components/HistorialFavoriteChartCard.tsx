@@ -3,6 +3,7 @@ import { Dimensions, TouchableOpacity, View } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { buildCryptoValueSeries, buildSavingsTotalSeries } from '@/services/historialService';
 import { format } from 'date-fns';
 import { LineChart as LineChartKit } from 'react-native-chart-kit';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
@@ -17,7 +18,9 @@ export type HistorialChartKey =
   | 'pieType'
   | 'pieCategory'
   | 'cumulative'
-  | 'trend';
+  | 'trend'
+  | 'cryptoQuantity'
+  | 'savingsTotal';
 
 interface HistorialFavoriteChartCardProps {
   chartKey: HistorialChartKey;
@@ -183,6 +186,47 @@ export default function HistorialFavoriteChartCard({
   const chartWidth = Math.max(220, screenWidth - 96);
 
   const content = (() => {
+    if (chartKey === 'cryptoQuantity') {
+      const series = buildCryptoValueSeries(transactions || []);
+      if (!series || series.length < 2) return null;
+
+      return (
+        <LineChart
+          data={series.map((s) => ({ value: s.value, label: '' }))}
+          color={tintColor}
+          thickness={2}
+          areaChart
+          curved
+          startFillColor={tintColor}
+          endFillColor="transparent"
+          width={chartWidth}
+          yAxisThickness={0}
+          xAxisColor="transparent"
+          noOfSections={3}
+        />
+      );
+    }
+
+    if (chartKey === 'savingsTotal') {
+      const series = buildSavingsTotalSeries(transactions || []);
+      if (!series || series.length < 2) return null;
+
+      return (
+        <LineChart
+          data={series.map((s) => ({ value: s.value, label: '' }))}
+          color={primaryColor}
+          thickness={2}
+          areaChart
+          curved
+          startFillColor={primaryColor}
+          endFillColor="transparent"
+          width={chartWidth}
+          yAxisThickness={0}
+          xAxisColor="transparent"
+          noOfSections={3}
+        />
+      );
+    }
     if (chartKey === 'overview') {
       return (
         <LineChartKit

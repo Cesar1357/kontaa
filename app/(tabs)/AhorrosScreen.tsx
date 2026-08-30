@@ -4,6 +4,7 @@ import { db } from "@/config/firebase";
 import { useAppTheme } from "@/hooks/ThemeContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useThemeColor } from "@/hooks/useThemeColor";
+import { actualizarPreciosUsuario, fetchMarkets, normalizeCoinId } from '@/services/cryptoService';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -82,8 +83,12 @@ export default function AhorrosScreen() {
   const [cryptoSearchResults, setCryptoSearchResults] = useState<any[]>([]);
   const [cryptoCantidad, setCryptoCantidad] = useState("");
   const [cryptoPrecioCompra, setCryptoPrecioCompra] = useState("");
-  const [cryptoPrecioActual, setCryptoPrecioActual] = useState("");
   const [cryptoCoinId, setCryptoCoinId] = useState("");
+  const [cryptoFechaCompra, setCryptoFechaCompra] = useState<Date>(new Date());
+  const [isCryptoDatePickerVisible, setCryptoDatePickerVisible] = useState(false);
+  const [cryptoLedger, setCryptoLedger] = useState<'local' | 'global'>('local');
+  const cryptoActionLock = useRef(false);
+  const [savingCryptoAction, setSavingCryptoAction] = useState(false);
   const [cryptoSearchFilter, setCryptoSearchFilter] = useState("");
   const cryptoListView = cryptoListViewMode;
   const [editingHoldingId, setEditingHoldingId] = useState<string | null>(null);
@@ -93,7 +98,7 @@ export default function AhorrosScreen() {
     mode: 'buy' | 'sell';
     inputType: 'money' | 'crypto';
     amount: string;
-    ledger: 'none' | 'transactions';
+    ledger: 'local' | 'global';
     balance: {
       cash: number;
       crypto: number;
@@ -104,7 +109,7 @@ export default function AhorrosScreen() {
     mode: 'buy',
     inputType: 'money',
     amount: '',
-    ledger: 'transactions',
+    ledger: 'global',
     balance: { cash: 0, crypto: 0 },
   });
 
@@ -152,6 +157,7 @@ export default function AhorrosScreen() {
   // detalle modal
   const [showDetalle, setShowDetalle] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
+  const [historyType, setHistoryType] = useState<'saving' | 'crypto'>('saving');
   const [transaccionesData, setTransaccionesData] = useState<any[]>([]);
   const [cargandoMovimientos, setCargandoMovimientos] = useState(false);
 
@@ -225,37 +231,45 @@ export default function AhorrosScreen() {
 
   modalBack: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: "rgba(4, 8, 18, 0.72)",
     justifyContent: "center",
     padding: 20,
   },
   modalCard: {
     backgroundColor: backgroundColor2,
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 22,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: `${borderColor}88`,
+    shadowColor: "#000",
+    shadowOpacity: 0.22,
+    shadowOffset: { width: 0, height: 12 },
+    shadowRadius: 24,
+    elevation: 8,
   },
 
   input: {
     backgroundColor: cardsMain,
-    borderRadius: 8,
+    borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 10,
+    paddingVertical: 12,
+    marginBottom: 12,
     color: textColor,
     borderWidth: 1,
-    borderColor: borderColor,
+    borderColor: `${borderColor}aa`,
+    fontSize: 14,
   },
 
   btn: {
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 12,
+    borderRadius: 12,
   },
 
   smallBtn: {
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
-    width: "32%",
+    width: "48%",
   },
    modalContainer: {
     flex: 1,
@@ -267,7 +281,7 @@ export default function AhorrosScreen() {
     backgroundColor: backgroundColor,
     borderRadius: 14,
     padding: 16,
-    maxHeight: "80%",
+    maxHeight: "76%",
   },
   modalTitle: {
     fontSize: 18,
@@ -410,8 +424,7 @@ export default function AhorrosScreen() {
   };
 
   const fetchCurrentCryptoPrice = async (coinId: string) => {
-    const normalizedId = (coinId || "").trim();
-    const mappedId = normalizedId ? (CRYPTO_ID_MAP[normalizedId.toUpperCase()] || normalizedId.toLowerCase()) : "";
+    const mappedId = normalizeCoinId(coinId);
 
     if (!mappedId) {
       return 0;
@@ -438,7 +451,7 @@ export default function AhorrosScreen() {
     (acc, item) => {
       const currentPrice = Number(item.currentPrice ?? getCryptoCurrentPrice(item.symbol) ?? 0);
       const quantity = Number(item.quantity ?? 0);
-      const avgCost = Number(item.avgCost ?? 0);
+      const avgCost = Number(item.avgCost ?? item.currentPrice ?? currentPrice ?? 0);
       const value = quantity * currentPrice;
       const cost = quantity * avgCost;
       acc.totalValue += value;
@@ -461,10 +474,53 @@ export default function AhorrosScreen() {
     setCryptoSearchResults([]);
     setCryptoCantidad("");
     setCryptoPrecioCompra("");
-    setCryptoPrecioActual("");
+    setCryptoFechaCompra(new Date());
+    setCryptoLedger('local');
     setEditingHoldingId(null);
     setShowCryptoForm(false);
   };
+
+  const [marketMap, setMarketMap] = useState<Map<string, any> | null>(null);
+  const [cryptoWindowChange, setCryptoWindowChange] = useState<{ money: number; percent: number }>({ money: 0, percent: 0 });
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const ids = cryptoHoldings.map((h) => normalizeCoinId(h.coinId || h.symbol)).filter(Boolean);
+        if (ids.length === 0) {
+          setMarketMap(new Map());
+          setCryptoWindowChange({ money: 0, percent: 0 });
+          return;
+        }
+        const map = await fetchMarkets(ids as string[]);
+        if (!mounted) return;
+        setMarketMap(map);
+
+        let prevTotal = 0;
+        let currTotal = 0;
+        for (const h of cryptoHoldings) {
+          const qty = Number(h.quantity || 0);
+          const resolvedId = normalizeCoinId(h.coinId || h.symbol);
+          const market = map.get(resolvedId);
+          const currPrice = Number(market?.current_price ?? h.currentPrice ?? 0);
+          const pct = typeof market?.price_change_percentage_24h_in_currency === 'number' ? Number(market.price_change_percentage_24h_in_currency) : 0;
+          const curr = qty * currPrice;
+          const divisor = Math.abs(pct) < 0.000001 ? 1 : 1 + pct / 100;
+          const prev = curr / divisor;
+          currTotal += curr;
+          prevTotal += Number.isFinite(prev) && prev > 0 ? prev : curr;
+        }
+
+        const money = currTotal - prevTotal;
+        const percent = prevTotal > 0 ? (money / prevTotal) * 100 : 0;
+        setCryptoWindowChange({ money, percent });
+      } catch (e) {
+        console.error('Error fetching crypto markets in AhorrosScreen', e);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [cryptoHoldings]);
 
   const selectCryptoOption = (option: { symbol: string; name: string; thumb?: string; id?: string }) => {
     setCryptoSymbol(option.symbol);
@@ -480,12 +536,8 @@ export default function AhorrosScreen() {
     const symbol = cryptoSymbol.trim().toUpperCase();
     const name = cryptoName.trim() || symbol || "Activo";
     const quantity = parseNumericInput(cryptoCantidad);
-    const explicitCurrentPrice = parseNumericInput(cryptoPrecioActual);
     const resolvedCoinId = cryptoCoinId || CRYPTO_ID_MAP[cryptoSymbol] || cryptoSymbol.toLowerCase();
-    const fetchedMarketPrice = await fetchCurrentCryptoPrice(resolvedCoinId);
-    const marketPrice = Number.isFinite(explicitCurrentPrice) && explicitCurrentPrice > 0
-      ? explicitCurrentPrice
-      : fetchedMarketPrice;
+    const marketPrice = await fetchCurrentCryptoPrice(resolvedCoinId);
     const avgCost = parseNumericInput(cryptoPrecioCompra);
     const safeAvgCost = Number.isFinite(avgCost) && avgCost > 0 ? avgCost : marketPrice;
 
@@ -506,6 +558,8 @@ export default function AhorrosScreen() {
 
     const priceForRecord = Number.isFinite(marketPrice) && marketPrice > 0 ? marketPrice : safeAvgCost;
     const now = Timestamp.now();
+    const purchaseDate = Timestamp.fromDate(cryptoFechaCompra);
+    const transactionId = !editingHoldingId && cryptoLedger === 'global' && userId ? `${Date.now()}-crypto` : null;
     const nextItem = {
       id: editingHoldingId || `${Date.now()}`,
       symbol,
@@ -515,7 +569,7 @@ export default function AhorrosScreen() {
       currentPrice: priceForRecord,
       icon: cryptoIcon || null,
       coinId: resolvedCoinId,
-      createdAt: editingHoldingId ? (null as any) : now,
+      createdAt: purchaseDate,
       updatedAt: now,
     };
 
@@ -526,9 +580,47 @@ export default function AhorrosScreen() {
 
       await setDoc(existingRef, {
         ...nextItem,
-        createdAt: docData?.createdAt ?? now,
+        createdAt: docData?.createdAt ?? purchaseDate,
         updatedAt: now,
       });
+
+      if (transactionId) {
+        await setDoc(doc(db, `users/${userId}/transacciones`, transactionId), {
+          tipo: 'egreso',
+          monto: Number(nextItem.quantity) * Number(nextItem.currentPrice || 0),
+          descripcion: `Compra inicial de ${nextItem.name} (${nextItem.symbol})`,
+          categoria: 'crypto',
+          fecha: purchaseDate,
+          createdAt: now,
+          crypto: {
+            symbol: nextItem.symbol,
+            name: nextItem.name,
+            quantity: Number(nextItem.quantity),
+            price: Number(nextItem.currentPrice || 0),
+          },
+          origen: 'movimiento-cripto',
+          cryptoLedger: 'global',
+        });
+      }
+
+      // Registrar movimiento inicial en subcollection 'movimientos' si la cantidad es mayor a 0 y es creación nueva
+      try {
+        if (!editingHoldingId && (Number(nextItem.quantity) || 0) > 0) {
+          await addDoc(collection(db, `users/${userId}/criptos`, nextItem.id, 'movimientos'), {
+            tipo: 'compra',
+            descripcion: 'Registro inicial de activo',
+            cantidad: Number(nextItem.quantity),
+            precio: Number(nextItem.currentPrice || 0),
+            monto: Number(nextItem.quantity) * Number(nextItem.currentPrice || 0),
+            fecha: purchaseDate,
+            createdAt: now,
+            originTransactionId: transactionId,
+            ledger: cryptoLedger,
+          });
+        }
+      } catch (e) {
+        console.warn('No se pudo registrar movimiento inicial de cripto:', e);
+      }
     } else {
       setCryptoHoldings((prev) => {
         if (editingHoldingId) {
@@ -549,48 +641,30 @@ export default function AhorrosScreen() {
     ToastAndroid.show(editingHoldingId ? "Activo actualizado" : "Activo agregado", ToastAndroid.SHORT);
   };
 
-  const actualizarPreciosCripto = async () => {
-    if (cryptoHoldings.length === 0) {
-      ToastAndroid.show("No tienes activos para actualizar", ToastAndroid.SHORT);
-      return;
-    }
-
+  const handleGuardarCryptoHolding = async () => {
+    if (cryptoActionLock.current) return;
+    cryptoActionLock.current = true;
+    setSavingCryptoAction(true);
     try {
-      const activeIds = cryptoHoldings
-        .map((item) => item.coinId || item.symbol.toLowerCase())
-        .filter(Boolean)
-        .join(",");
+      await guardarCryptoHolding();
+    } finally {
+      cryptoActionLock.current = false;
+      setSavingCryptoAction(false);
+    }
+  };
 
-      if (!activeIds) {
-        ToastAndroid.show("No se pudo identificar la moneda", ToastAndroid.SHORT);
-        return;
-      }
-
-      const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(activeIds)}&vs_currencies=mxn`);
-      const data = await response.json();
-
-      const nextHoldings = cryptoHoldings.map((item) => {
-        const coinId = item.coinId || item.symbol.toLowerCase();
-        const price = Number(data?.[coinId]?.mxn ?? item.currentPrice ?? 0);
-        return {
-          ...item,
-          currentPrice: Number.isFinite(price) && price > 0 ? price : item.currentPrice ?? 0,
-        };
-      });
-
-      setCryptoHoldings(nextHoldings);
-
+  const actualizarPreciosCripto = async () => {
+    try {
       const userId = (user as any)?.uid;
-      if (userId) {
-        const now = Timestamp.now();
-        await Promise.all(
-          nextHoldings.map((item) =>
-            setDoc(doc(db, `users/${userId}/criptos`, item.id), {
-              ...item,
-              updatedAt: now,
-            })
-          )
-        );
+      const updated = userId
+        ? await actualizarPreciosUsuario(userId, cryptoHoldings)
+        : [];
+
+      // merge local state with updated values when available
+      if (Array.isArray(updated) && updated.length > 0) {
+        setCryptoHoldings((prev) => prev.map((p) => updated.find((u) => u.id === p.id) || p));
+      } else {
+        ToastAndroid.show("No hay precios nuevos para actualizar", ToastAndroid.SHORT);
       }
 
       ToastAndroid.show("Precios actualizados", ToastAndroid.SHORT);
@@ -608,7 +682,7 @@ export default function AhorrosScreen() {
     setCryptoCoinId(holding.coinId || "");
     setCryptoCantidad(String(holding.quantity ?? ""));
     setCryptoPrecioCompra(String(holding.avgCost ?? ""));
-    setCryptoPrecioActual(String(holding.currentPrice ?? ""));
+    setCryptoFechaCompra(holding.createdAt?.seconds ? new Date(holding.createdAt.seconds * 1000) : new Date());
     setShowCryptoForm(true);
   };
 
@@ -635,7 +709,7 @@ export default function AhorrosScreen() {
       mode: 'buy',
       inputType: 'money',
       amount: '',
-      ledger: 'transactions',
+      ledger: 'global',
       balance: {
         cash: cashBalance,
         crypto: Number(holding.quantity ?? 0),
@@ -699,8 +773,9 @@ export default function AhorrosScreen() {
 
     await setDoc(ref, nextData);
 
-    if (quickTrade.ledger === 'transactions') {
-      await addDoc(collection(db, `users/${userId}/transacciones`), {
+    const transactionId = quickTrade.ledger === 'global' ? `${Date.now()}-crypto-trade` : null;
+    if (transactionId) {
+      await setDoc(doc(db, `users/${userId}/transacciones`, transactionId), {
         tipo: quickTrade.mode === 'buy' ? 'egreso' : 'ingreso',
         monto: moneyAmount,
         descripcion: `${quickTrade.mode === 'buy' ? 'Compra rápida' : 'Venta rápida'} ${currentHolding.symbol}`,
@@ -709,10 +784,31 @@ export default function AhorrosScreen() {
         createdAt: Timestamp.now(),
         crypto: {
           symbol: currentHolding.symbol,
+          name: currentHolding.name,
           quantity: cryptoAmount,
           price: currentPrice,
         },
+        origen: 'movimiento-cripto',
+        cryptoLedger: 'global',
       });
+    }
+
+    // Registrar movimiento en subcollection 'movimientos' del activo
+    try {
+      await addDoc(collection(db, `users/${userId}/criptos`, currentHolding.id, 'movimientos'), {
+        tipo: quickTrade.mode === 'buy' ? 'compra' : 'venta',
+        descripcion: `${quickTrade.mode === 'buy' ? 'Compra rápida' : 'Venta rápida'}`,
+        cantidad: cryptoAmount,
+        precio: currentPrice,
+        monto: moneyAmount,
+        fecha: Timestamp.now(),
+        createdAt: Timestamp.now(),
+        originTransactionId: transactionId,
+        ledger: quickTrade.ledger,
+        cryptoLedger: quickTrade.ledger,
+      });
+    } catch (e) {
+      console.warn('No se pudo registrar movimiento rapido en subcollection movimientos:', e);
     }
 
     setQuickTrade({
@@ -721,10 +817,22 @@ export default function AhorrosScreen() {
       mode: 'buy',
       inputType: 'money',
       amount: '',
-      ledger: 'transactions',
+      ledger: 'global',
       balance: { cash: 0, crypto: 0 },
     });
     ToastAndroid.show(quickTrade.mode === 'buy' ? 'Compra rápida registrada' : 'Venta rápida registrada', ToastAndroid.SHORT);
+  };
+
+  const handleGuardarQuickTrade = async () => {
+    if (cryptoActionLock.current) return;
+    cryptoActionLock.current = true;
+    setSavingCryptoAction(true);
+    try {
+      await guardarQuickTrade();
+    } finally {
+      cryptoActionLock.current = false;
+      setSavingCryptoAction(false);
+    }
   };
 
   const eliminarHolding = async (holdingId: string) => {
@@ -809,6 +917,17 @@ export default function AhorrosScreen() {
     setSinPlazo(false);
     setFechaLimite(toIsoDate(date));
   };
+
+  const handleCryptoFechaConfirm = (date: Date) => {
+    setCryptoDatePickerVisible(false);
+    setCryptoFechaCompra(date);
+  };
+
+  const formatDate = (date: Date) => date.toLocaleDateString("es-MX", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 
   // Crear nuevo ahorro
   const guardarNuevo = async () => {
@@ -931,16 +1050,28 @@ export default function AhorrosScreen() {
     const userId = (user as any)?.uid;
     if (!userId) return;
     setSelected(a);
+    setHistoryType('saving');
     setShowTransacciones(true);
     setCargandoMovimientos(true);
 
     try {
       const ref = doc(db, `users/${userId}/ahorros`, a.id);
       const q = query(collection(ref, "movimientos"), orderBy("creado", "desc"));
+      let balanceSynced = false;
 
       const unsub = onSnapshot(q, (snap) => {
-        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setTransaccionesData(data);
+        const allData = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const balance = allData.reduce((total, movement: any) => {
+          const amount = Number(movement.monto || 0);
+          const adds = movement.tipo === "deposito" || movement.tipo === "transferencia";
+          return total + (adds ? amount : -amount);
+        }, 0);
+        setTransaccionesData(allData);
+        setSelected((current: any) => current ? { ...current, cantidadActual: balance } : current);
+        if (!balanceSynced && Math.abs(Number(a.cantidadActual || 0) - balance) > 0.005) {
+          balanceSynced = true;
+          updateDoc(ref, { cantidadActual: balance });
+        }
         setCargandoMovimientos(false);
       });
 
@@ -950,6 +1081,97 @@ export default function AhorrosScreen() {
       Alert.alert("Error", "No se pudieron cargar las transacciones.");
       setCargandoMovimientos(false);
     }
+  };
+
+  const abrirCryptoMovimientos = async (holding: any) => {
+    const userId = (user as any)?.uid;
+    if (!userId) return;
+    setSelected(holding);
+    setHistoryType('crypto');
+    setShowTransacciones(true);
+    setCargandoMovimientos(true);
+
+    try {
+      const ref = doc(db, `users/${userId}/criptos`, holding.id);
+      const q = query(collection(ref, 'movimientos'), orderBy('fecha', 'desc'));
+      const unsub = onSnapshot(q, (snap) => {
+        setTransaccionesData(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setCargandoMovimientos(false);
+      });
+      return unsub;
+    } catch (error) {
+      console.error('Error al obtener movimientos de cripto:', error);
+      setCargandoMovimientos(false);
+    }
+  };
+
+  const eliminarCryptoMovimiento = (movement: any) => {
+    if (!selected || historyType !== 'crypto') return;
+
+    Alert.alert(
+      'Eliminar movimiento',
+      'Se eliminará de la cartera y, si es Global, también de Transacciones.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            const userId = (user as any)?.uid;
+            if (!userId) return;
+
+            try {
+              const movementsRef = collection(db, `users/${userId}/criptos/${selected.id}/movimientos`);
+              const movementRef = doc(movementsRef, movement.id);
+              const snapshot = await getDocs(movementsRef);
+              const remaining = snapshot.docs.filter((item) => item.id !== movement.id);
+              const quantity = remaining.reduce((total, item) => {
+                const data = item.data() as any;
+                const amount = Number(data.cantidad || 0);
+                return total + (data.tipo === 'venta' ? -amount : amount);
+              }, 0);
+              const buys = remaining.reduce((total, item) => {
+                const data = item.data() as any;
+                return data.tipo === 'compra' ? total + Number(data.cantidad || 0) * Number(data.precio || 0) : total;
+              }, 0);
+              const boughtQuantity = remaining.reduce((total, item) => {
+                const data = item.data() as any;
+                return data.tipo === 'compra' ? total + Number(data.cantidad || 0) : total;
+              }, 0);
+              const transactionId = movement.originTransactionId || null;
+              const transactionRef = transactionId ? doc(db, `users/${userId}/transacciones`, transactionId) : null;
+              const shouldRemoveMirror = movement.ledger !== 'local';
+              const transactionsSnap = shouldRemoveMirror && !transactionRef
+                ? await getDocs(collection(db, `users/${userId}/transacciones`))
+                : null;
+              const legacyMirror = transactionsSnap?.docs.find((item) => {
+                const data = item.data() as any;
+                const sameAsset = data.crypto?.symbol === selected.symbol;
+                const sameAmount = Math.abs(Number(data.monto || 0) - Number(movement.monto || 0)) < 0.005;
+                const sameType = movement.tipo === 'venta' ? data.tipo === 'ingreso' : data.tipo === 'egreso';
+                return sameAsset && sameAmount && sameType && data.origen === 'movimiento-cripto';
+              });
+              const mirrorRef = transactionRef || (legacyMirror ? legacyMirror.ref : null);
+
+              await runTransaction(db, async (transaction) => {
+                transaction.delete(movementRef);
+                if (mirrorRef) transaction.delete(mirrorRef);
+                transaction.update(doc(db, `users/${userId}/criptos`, selected.id), {
+                  quantity: Math.max(0, quantity),
+                  avgCost: boughtQuantity > 0 ? buys / boughtQuantity : 0,
+                  updatedAt: Timestamp.now(),
+                });
+              });
+
+              ToastAndroid.show('Movimiento eliminado', ToastAndroid.SHORT);
+            } catch (error) {
+              console.error('Error eliminando movimiento cripto:', error);
+              Alert.alert('Error', 'No se pudo eliminar el movimiento cripto.');
+            }
+          },
+        },
+      ],
+    );
   };
 
   // Depositar / retirar (transactional)
@@ -968,21 +1190,30 @@ export default function AhorrosScreen() {
     const transaccionesRef = collection(db, `users/${userId}/transacciones`);
 
     try {
+      const movementsSnap = await getDocs(movsRef);
+      const current = movementsSnap.docs.reduce((total, movementDoc) => {
+        const movement = movementDoc.data() as any;
+        const amount = Number(movement.monto || 0);
+        const adds = movement.tipo === "deposito" || movement.tipo === "transferencia";
+        return total + (adds ? amount : -amount);
+      }, 0);
+      const addsToSavings = movimientoTipo === "deposito" || movimientoTipo === "transferencia";
+      const newAmount = current + (addsToSavings ? montoNum : -montoNum);
+
+      if (!addsToSavings && newAmount < 0) {
+        throw new Error("No hay suficiente en la meta para retirar esa cantidad.");
+      }
+
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(ahorroRef);
         if (!snap.exists()) throw new Error("Meta no encontrada");
 
-        const current = snap.data()?.cantidadActual || 0;
-        const newAmount = movimientoTipo === "deposito"
-          ? current + montoNum
-          : current - montoNum;
-
-        if ((movimientoTipo === "retiro" || movimientoTipo === "transferencia" || movimientoTipo === "pasarATransacciones") && newAmount < 0) {
-          throw new Error("No hay suficiente en la meta para retirar esa cantidad.");
-        }
+        const transactionRef = movimientoTipo === "transferencia" || movimientoTipo === "pasarATransacciones"
+          ? doc(transaccionesRef)
+          : null;
 
         if (movimientoTipo === "transferencia") {
-          tx.set(doc(transaccionesRef), {
+          tx.set(transactionRef!, {
             descripcion: `Transferencia a ahorro: ${selected.nombre}`,
             monto: montoNum,
             tipo: "egreso",
@@ -995,7 +1226,7 @@ export default function AhorrosScreen() {
         }
 
         if (movimientoTipo === "pasarATransacciones") {
-          tx.set(doc(transaccionesRef), {
+          tx.set(transactionRef!, {
             descripcion: `Retiro de ahorro: ${selected.nombre}`,
             monto: montoNum,
             tipo: "ingreso",
@@ -1015,17 +1246,18 @@ export default function AhorrosScreen() {
 
         // registrar movimiento en subcollection
         const movimientoDoc = {
+          transaccionId: transactionRef?.id || null,
           tipo: movimientoTipo,
           monto: montoNum,
           creado: serverTimestamp(),
           nota:
             movimientoTipo === "deposito"
-              ? "Depósito manual"
+              ? "Depósito manual (sin transacciones)"
               : movimientoTipo === "retiro"
-                ? "Retiro manual"
+                ? "Retiro manual (sin transacciones)"
                 : movimientoTipo === "transferencia"
-                  ? "Transferencia desde saldo"
-                  : "Retiro hacia transacciones",
+                  ? "Transferencia desde transacciones"
+                  : "Transferencia hacia transacciones",
         };
         tx.set(doc(movsRef), movimientoDoc);
       });
@@ -1036,6 +1268,66 @@ export default function AhorrosScreen() {
       console.error("Error movimiento:", e);
       Alert.alert("Error", e?.message || "No se pudo procesar el movimiento.");
     }
+  };
+
+  const eliminarTransferenciaAhorro = (movement: any) => {
+    if (!selected) return;
+    const isTransfer = movement.tipo === "transferencia" || movement.tipo === "pasarATransacciones";
+
+    Alert.alert(
+      isTransfer ? "Eliminar transferencia" : "Eliminar movimiento",
+      isTransfer
+        ? "Se eliminará de este ahorro y de Transacciones, y se recalculará el saldo de la meta."
+        : "Se eliminará este movimiento manual y se recalculará el saldo de la meta.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: async () => {
+            const userId = (user as any)?.uid;
+            if (!userId) return;
+
+            try {
+              const ahorroRef = doc(db, `users/${userId}/ahorros`, selected.id);
+              const movementsRef = collection(db, `users/${userId}/ahorros/${selected.id}/movimientos`);
+              const transactionRef = isTransfer && movement.transaccionId
+                ? doc(db, `users/${userId}/transacciones`, movement.transaccionId)
+                : null;
+              const allMovementsSnap = await getDocs(movementsRef);
+              const allTransactionsSnap = isTransfer && !transactionRef
+                ? await getDocs(collection(db, `users/${userId}/transacciones`))
+                : null;
+              const legacyTransaction = isTransfer ? allTransactionsSnap?.docs.find((item) => {
+                const data = item.data() as any;
+                const expectedOrigin = movement.tipo === "transferencia" ? "transferencia-ahorro" : "retiro-ahorro";
+                return data.ahorroId === selected.id && data.origen === expectedOrigin && Math.abs(Number(data.monto || 0) - Number(movement.monto || 0)) < 0.005;
+              }) : undefined;
+              const resolvedTransactionRef = transactionRef || (legacyTransaction ? legacyTransaction.ref : null);
+              const remainingBalance = allMovementsSnap.docs
+                .filter((item) => item.id !== movement.id)
+                .reduce((total, item) => {
+                  const data = item.data() as any;
+                  const amount = Number(data.monto || 0);
+                  return total + (data.tipo === "deposito" || data.tipo === "transferencia" ? amount : -amount);
+                }, 0);
+
+              await runTransaction(db, async (tx) => {
+                tx.delete(doc(movementsRef, movement.id));
+                if (resolvedTransactionRef) tx.delete(resolvedTransactionRef);
+                tx.update(ahorroRef, { cantidadActual: remainingBalance, actualizadoEn: serverTimestamp() });
+              });
+
+              setTransaccionesData((current) => current.filter((item) => item.id !== movement.id));
+              ToastAndroid.show(isTransfer ? "Transferencia eliminada" : "Movimiento eliminado", ToastAndroid.SHORT);
+            } catch (error) {
+              console.error("Error eliminando transferencia:", error);
+              Alert.alert("Error", "No se pudo eliminar la transferencia.");
+            }
+          },
+        },
+      ],
+    );
   };
 
   // Eliminar meta
@@ -1079,11 +1371,6 @@ export default function AhorrosScreen() {
 
   // UI
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
-    >
     <View style={{ flex: 1, backgroundColor: backgroundColor2 }}>
       <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 80 }}>
         <Animated.View layout={Layout.springify()}>
@@ -1214,7 +1501,11 @@ export default function AhorrosScreen() {
                     <Text style={{ color: iconColor, fontWeight: "700" }}>Actualizar</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => setShowCryptoForm(true)}
+                    onPress={() => {
+                      setEditingHoldingId(null);
+                      setCryptoFechaCompra(new Date());
+                      setShowCryptoForm(true);
+                    }}
                     style={{ backgroundColor: primaryColor, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 }}
                   >
                     <Text style={{ color: "white", fontWeight: "700" }}>+ activo</Text>
@@ -1314,9 +1605,15 @@ export default function AhorrosScreen() {
                 const currentPrice = Number(holding.currentPrice ?? getCryptoCurrentPrice(holding.symbol) ?? 0);
                 const quantity = Number(holding.quantity ?? 0);
                 const value = quantity * currentPrice;
-                const cost = quantity * Number(holding.avgCost ?? 0);
+                const cost = quantity * Number(holding.avgCost ?? holding.currentPrice ?? currentPrice ?? 0);
                 const gain = value - cost;
                 const gainPercent = cost > 0 ? (gain / cost) * 100 : 0;
+                const resolvedId = normalizeCoinId(holding.coinId || holding.symbol);
+                const market = marketMap?.get?.(resolvedId);
+                const windowPct = market && typeof market.price_change_percentage_24h_in_currency === 'number'
+                  ? Number(market.price_change_percentage_24h_in_currency)
+                  : 0;
+                const windowMoney = value * (windowPct / 100);
 
                 if (cryptoListView === "compact") {
                   return (
@@ -1336,13 +1633,13 @@ export default function AhorrosScreen() {
                             <Text style={{ color: textColor, opacity: 0.7, fontSize: 10 }}>{quantity.toFixed(5)}</Text>
                           </View>
                         </View>
-                          <TouchableOpacity onPress={() => abrirQuickTrade(holding)} style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: "#3b82f6", alignItems: "center", justifyContent: "center", marginRight: 8 }}>
-                            <Ionicons name="swap-horizontal-outline" size={14} color="white" />
-                          </TouchableOpacity>
-                        <View style={{ alignItems: "flex-end", marginLeft: 8 }}>
+                        <TouchableOpacity onPress={() => abrirQuickTrade(holding)} style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: "#3b82f6", alignItems: "center", justifyContent: "center", marginRight: 8 }}>
+                          <Ionicons name="swap-horizontal-outline" size={14} color="white" />
+                        </TouchableOpacity>
+                        <View style={{ alignItems: "flex-end", marginLeft: 8, minWidth: 70 }}>
                           <Text style={{ color: textColor, fontWeight: "800", fontSize: 12 }}>{formatDisplayMoney(value)}</Text>
-                          <Text style={{ fontSize: 10, color: gain >= 0 ? "#34d399" : "#f87171", fontWeight: "700" }}>
-                            {gain >= 0 ? "+" : "-"}{Math.abs(gainPercent).toFixed(1)}%
+                          <Text style={{ fontSize: 10, color: windowMoney >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                            {windowMoney >= 0 ? '+' : '-'}{formatDisplayMoney(Math.abs(windowMoney))} ({windowPct.toFixed(2)}%)
                           </Text>
                         </View>
                       </View>
@@ -1363,13 +1660,18 @@ export default function AhorrosScreen() {
                         )}
                         <View>
                           <ThemedText style={styles.cardTitle}>{holding.name}</ThemedText>
-                          <ThemedText style={styles.cardSmall}>{holding.symbol} • {quantity} unidades</ThemedText>
+                          <ThemedText style={styles.cardSmall}>{holding.symbol} • {quantity.toFixed(4)} unidades</ThemedText>
                         </View>
                       </View>
                       <View style={{ alignItems: "flex-end" }}>
-                        <ThemedText style={{ fontWeight: "800", color: textColor }}>{formatDisplayMoney(value)}</ThemedText>
-                        <ThemedText style={{ fontSize: 12, color: gain >= 0 ? "#34d399" : "#f87171" }}>
-                          {gain >= 0 ? "+" : "-"}{formatDisplayMoney(Math.abs(gain))}
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                          <ThemedText style={{ fontSize: 11, color: gain >= 0 ? "#34d399" : "#f87171", marginRight: 6 }}>
+                            {gain >= 0 ? "+" : "-"}{formatDisplayMoney(Math.abs(gain))}
+                          </ThemedText>
+                          <ThemedText style={{ color: textColor }}>{formatDisplayMoney(value)}</ThemedText>
+                        </View>
+                        <ThemedText style={{ fontSize: 11, color: windowMoney >= 0 ? "#34d399" : "#f87171", marginTop: -7 }}>
+                          {windowMoney >= 0 ? '+' : '-'}{formatDisplayMoney(Math.abs(windowMoney))} ({windowPct.toFixed(2)}%)
                         </ThemedText>
                       </View>
                     </View>
@@ -1386,6 +1688,9 @@ export default function AhorrosScreen() {
                     <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 12, gap: 8 }}>
                       <TouchableOpacity onPress={() => editarHolding(holding)} style={[styles.iconBtn, { backgroundColor: primaryColor }]}>
                         <Ionicons name="create-outline" size={16} color="white" />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => abrirCryptoMovimientos(holding)} accessibilityLabel="Ver historial de cripto" style={[styles.iconBtn, { backgroundColor: primaryColor }]}> 
+                        <Ionicons name="time-outline" size={16} color="white" />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => abrirQuickTrade(holding)} style={[styles.iconBtn, { backgroundColor: "#3b82f6" }]}>
                         <Ionicons name="swap-horizontal-outline" size={16} color="white" />
@@ -1489,14 +1794,19 @@ export default function AhorrosScreen() {
                 contentContainerStyle={{ justifyContent: "center", paddingVertical: 20 }}
               >
                 <View style={styles.modalCard}>
-                  <ThemedText style={{ fontSize: 20, fontWeight: "700", marginBottom: 10 }}>Nuevo activo</ThemedText>
+                  <ThemedText style={{ fontSize: 22, fontWeight: "800", marginBottom: 4 }}>
+                    {editingHoldingId ? "Editar activo" : "Nuevo activo"}
+                  </ThemedText>
+                  <ThemedText style={{ color: textColor, opacity: 0.62, fontSize: 12, marginBottom: 18 }}>
+                    Registra tu posición y conserva su punto de partida.
+                  </ThemedText>
 
-                  <Text style={{ color: textColor, opacity: 0.8, fontWeight: "700", marginBottom: 8 }}>
-                    Selecciona una cripto
+                  <Text style={{ color: textColor, opacity: 0.72, fontWeight: "700", fontSize: 12, marginBottom: 8 }}>
+                    ACTIVO
                   </Text>
 
                   <TextInput
-                    placeholder="Buscar cripto..."
+                    placeholder="Buscar por nombre o símbolo"
                     placeholderTextColor={textColor}
                     value={cryptoSearch}
                     onChangeText={(value) => {
@@ -1506,7 +1816,7 @@ export default function AhorrosScreen() {
                     style={styles.input}
                   />
 
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", marginBottom: 12, gap: 8 }}>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", marginBottom: 16, gap: 8 }}>
                     {cryptoSearchResults.length > 0 ? (
                       cryptoSearchResults.map((option) => {
                         const symbol = option.symbol?.toUpperCase() || "";
@@ -1583,8 +1893,12 @@ export default function AhorrosScreen() {
                     </View>
                   ) : null}
 
+                  <Text style={{ color: textColor, opacity: 0.72, fontWeight: "700", fontSize: 12, marginBottom: 8 }}>
+                    POSICIÓN
+                  </Text>
+
                   <TextInput
-                    placeholder="Cantidad"
+                    placeholder="Cantidad de unidades"
                     placeholderTextColor={textColor}
                     keyboardType="decimal-pad"
                     value={cryptoCantidad}
@@ -1593,7 +1907,7 @@ export default function AhorrosScreen() {
                   />
 
                   <TextInput
-                    placeholder="Precio de compra (se usa si no hay precio actual)"
+                    placeholder="Precio de compra por unidad"
                     placeholderTextColor={textColor}
                     keyboardType="decimal-pad"
                     value={cryptoPrecioCompra}
@@ -1601,14 +1915,39 @@ export default function AhorrosScreen() {
                     style={styles.input}
                   />
 
-                  <TextInput
-                    placeholder="Precio actual (opcional, se toma del mercado si se deja vacío)"
-                    placeholderTextColor={textColor}
-                    keyboardType="decimal-pad"
-                    value={cryptoPrecioActual}
-                    onChangeText={setCryptoPrecioActual}
-                    style={styles.input}
-                  />
+                  <TouchableOpacity
+                    onPress={() => setCryptoDatePickerVisible(true)}
+                    style={[styles.input, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
+                  >
+                    <View>
+                      <Text style={{ color: textColor, fontSize: 11, opacity: 0.62, marginBottom: 2 }}>FECHA DE COMPRA</Text>
+                      <Text style={{ color: textColor, fontWeight: "600" }}>{formatDate(cryptoFechaCompra)}</Text>
+                    </View>
+                    <Ionicons name="calendar-outline" size={19} color={primaryColor} />
+                  </TouchableOpacity>
+
+                  <Text style={{ color: textColor, opacity: 0.72, fontWeight: "700", fontSize: 12, marginBottom: 8 }}>REGISTRAR COMO</Text>
+                  <View style={{ flexDirection: "row", marginBottom: 12 }}>
+                    {(["local", "global"] as const).map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        onPress={() => setCryptoLedger(option)}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 10,
+                          borderRadius: 10,
+                          marginRight: option === "local" ? 8 : 0,
+                          backgroundColor: cryptoLedger === option ? primaryColor : cardsMain,
+                          borderWidth: 1,
+                          borderColor: primaryColor,
+                        }}
+                      >
+                        <Text style={{ color: cryptoLedger === option ? "white" : iconColor, textAlign: "center", fontWeight: "700" }}>
+                          {option === "local" ? "Local" : "Global"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
                   <View style={{ flexDirection: "row", gap: 8 }}>
                     <TouchableOpacity
@@ -1619,10 +1958,11 @@ export default function AhorrosScreen() {
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      onPress={guardarCryptoHolding}
-                      style={[styles.btn, { backgroundColor: primaryColor, flex: 1 }]}
+                      onPress={handleGuardarCryptoHolding}
+                      disabled={savingCryptoAction}
+                      style={[styles.btn, { backgroundColor: primaryColor, flex: 1, opacity: savingCryptoAction ? 0.65 : 1 }]}
                     >
-                      <Text style={{ color: "white", textAlign: "center" }}>Guardar</Text>
+                      {savingCryptoAction ? <ActivityIndicator color="white" /> : <Text style={{ color: "white", textAlign: "center" }}>Guardar</Text>}
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1644,7 +1984,7 @@ export default function AhorrosScreen() {
                 }}
               >
                 <ThemedText style={styles.modalTitle}>
-                  Movimientos de {selected?.nombre || ""}
+                  Historial de {selected?.name || selected?.nombre || selected?.symbol || ""}
                 </ThemedText>
                 <TouchableOpacity onPress={() => setShowTransacciones(false)}>
                   <Ionicons name="close" size={24} color={iconColor} />
@@ -1672,27 +2012,52 @@ export default function AhorrosScreen() {
                 <FlatList
                   data={transaccionesData}
                   keyExtractor={(item) => item.id}
-                  contentContainerStyle={{ marginTop: 10 }}
+                  style={{ maxHeight: 420 }}
+                  contentContainerStyle={{ marginTop: 10, paddingBottom: 2 }}
                   renderItem={({ item }) => (
-                    <View style={styles.movCard}>
-                      <ThemedText
-                        style={{
-                          color: item.tipo === "deposito" || item.tipo === "transferencia" ? "#4ade80" : "#f87171",
-                          fontWeight: "600",
-                        }}
-                      >
-                        {item.tipo === "deposito" || item.tipo === "transferencia" ? "+" : "-"}${item.monto.toFixed(2)}
-                      </ThemedText>
-                      <Text style={{ color: textColor, fontSize: 12, opacity: 0.75 }}>
-                        {item.nota || "Sin descripción"}
-                      </Text>
-                      {item.creado?.seconds ? (
-                        <Text style={{ color: textColor, fontSize: 11, marginTop: 2, opacity: 0.55 }}>
-                          {new Date(
-                            item.creado.seconds * 1000
-                          ).toLocaleDateString()}
+                    <View style={[styles.movCard, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <ThemedText
+                          style={{
+                            color: historyType === 'crypto'
+                              ? (item.tipo === 'compra' ? "#4ade80" : "#f87171")
+                              : (item.tipo === "deposito" || item.tipo === "transferencia" ? "#4ade80" : "#f87171"),
+                            fontWeight: "600",
+                          }}
+                        >
+                          {historyType === 'crypto'
+                            ? (item.tipo === 'compra' ? "+" : "-")
+                            : (item.tipo === "deposito" || item.tipo === "transferencia" ? "+" : "-")}
+                          ${Number(item.monto || 0).toFixed(2)}
+                        </ThemedText>
+                        <Text style={{ color: textColor, fontSize: 12, opacity: 0.75 }}>
+                          {historyType === 'crypto'
+                            ? (item.descripcion || (item.tipo === 'compra' ? 'Compra de cripto' : 'Venta de cripto'))
+                            : (item.nota || "Sin descripción")}
                         </Text>
-                      ) : null}
+                        {(item.creado?.seconds || item.fecha?.seconds) ? (
+                          <Text style={{ color: textColor, fontSize: 11, marginTop: 2, opacity: 0.55 }}>
+                            {new Date((item.creado || item.fecha).seconds * 1000).toLocaleDateString("es-MX")}
+                          </Text>
+                        ) : null}
+                      </View>
+                      {historyType === 'saving' ? (
+                        <TouchableOpacity
+                          onPress={() => eliminarTransferenciaAhorro(item)}
+                          accessibilityLabel={item.tipo === "transferencia" || item.tipo === "pasarATransacciones" ? "Eliminar transferencia" : "Eliminar movimiento"}
+                          style={{ marginLeft: 10, width: 32, height: 32, borderRadius: 9, borderWidth: 1, borderColor: "#ef4444", alignItems: "center", justifyContent: "center" }}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#f87171" />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          onPress={() => eliminarCryptoMovimiento(item)}
+                          accessibilityLabel="Eliminar movimiento cripto"
+                          style={{ marginLeft: 10, width: 32, height: 32, borderRadius: 9, borderWidth: 1, borderColor: "#ef4444", alignItems: "center", justifyContent: "center" }}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#f87171" />
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 />
@@ -1706,13 +2071,17 @@ export default function AhorrosScreen() {
         <TouchableWithoutFeedback onPress={() => setShowNuevo(false)}>
           <View style={styles.modalBack}>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalCard}>
-              <ThemedText style={{ fontSize: 20, fontWeight: "700", marginBottom: 8 }}>
+              <ThemedText style={{ fontSize: 22, fontWeight: "800", marginBottom: 4 }}>
                 {editando ? "Editar meta" : "Nueva meta"}
               </ThemedText>
+              <ThemedText style={{ color: textColor, opacity: 0.62, fontSize: 12, marginBottom: 18 }}>
+                Define un objetivo claro para darle dirección a tus ahorros.
+              </ThemedText>
 
+              <Text style={{ color: textColor, opacity: 0.72, fontWeight: "700", fontSize: 12, marginBottom: 8 }}>DETALLES</Text>
               <TextInput
                 ref={nombreInputRef}
-                placeholder="Nombre"
+                placeholder="Nombre de la meta"
                 placeholderTextColor={textColor}
                 value={nombre}
                 onChangeText={setNombre}
@@ -1720,7 +2089,7 @@ export default function AhorrosScreen() {
               />
 
               <TextInput
-                placeholder="Meta (MXN) (opcional)"
+                placeholder="Objetivo en MXN (opcional)"
                 placeholderTextColor={textColor}
                 keyboardType="numeric"
                 value={meta}
@@ -1729,7 +2098,7 @@ export default function AhorrosScreen() {
               />
 
               <TextInput
-                placeholder="Descripción (opcional)"
+                placeholder="Descripción breve (opcional)"
                 placeholderTextColor={textColor}
                 value={descripcion}
                 onChangeText={setDescripcion}
@@ -1737,7 +2106,7 @@ export default function AhorrosScreen() {
               />
               <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10, justifyContent: "space-between" }}>
                 <ThemedText style={{ fontSize: 13, fontWeight: "600", marginBottom: 6 }}>
-                  Plazo
+                  PLAZO
                 </ThemedText>
                 <TouchableOpacity
                   onPress={() => {
@@ -1762,7 +2131,7 @@ export default function AhorrosScreen() {
                   <Text style={{ color: iconColor, fontSize: 12, fontWeight: "600" }}>Sin plazo</Text>
                 </TouchableOpacity>
               </View>
-              <View style={{ flexDirection: "row", marginBottom: 10, justifyContent: "center" }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", marginBottom: 10, gap: 8 }}>
                 <TouchableOpacity
                   onPress={() => {
                     setSinPlazo(false);
@@ -1770,13 +2139,12 @@ export default function AhorrosScreen() {
                   }}
                   style={[
                     styles.smallBtn,
+                    { flex: 1, minWidth: 0, width: undefined },
                     plazo === "corto" ? { backgroundColor: "#3edc81" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: plazo === "corto" ? "black" : iconColor }}>Corto (1 mes)</Text>
+                  <Text style={{ color: plazo === "corto" ? "black" : iconColor, textAlign: "center", fontSize: 11 }}>Corto (1 mes)</Text>
                 </TouchableOpacity>
-
-                <View style={{ width: 8 }} />
 
                 <TouchableOpacity
                   onPress={() => {
@@ -1785,13 +2153,12 @@ export default function AhorrosScreen() {
                   }}
                   style={[
                     styles.smallBtn,
+                    { flex: 1, minWidth: 0, width: undefined },
                     plazo === "mediano" ? { backgroundColor: "#93c5fd" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: plazo === "mediano" ? "black" : iconColor }}>Mediano (1 año)</Text>
+                  <Text style={{ color: plazo === "mediano" ? "black" : iconColor, textAlign: "center", fontSize: 11 }}>Mediano (1 año)</Text>
                 </TouchableOpacity>
-
-                <View style={{ width: 8 }} />
 
                 <TouchableOpacity
                   onPress={() => {
@@ -1800,10 +2167,11 @@ export default function AhorrosScreen() {
                   }}
                   style={[
                     styles.smallBtn,
+                    { flex: 1, minWidth: 0, width: undefined },
                     plazo === "largo" ? { backgroundColor: "#c084fc" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: plazo === "largo" ? "black" : iconColor }}>Largo (2 años)</Text>
+                  <Text style={{ color: plazo === "largo" ? "black" : iconColor, textAlign: "center", fontSize: 11 }}>Largo (2 años)</Text>
                 </TouchableOpacity>
               </View>
 
@@ -1927,8 +2295,9 @@ export default function AhorrosScreen() {
                     ))}
                   </View>
 
+                  <Text style={{ color: textColor, opacity: 0.65, fontSize: 11, fontWeight: '700', marginBottom: 7 }}>REGISTRAR COMO</Text>
                   <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-                    {(['none', 'transactions'] as const).map((option) => (
+                    {(['local', 'global'] as const).map((option) => (
                       <TouchableOpacity
                         key={option}
                         onPress={() => setQuickTrade((prev) => ({ ...prev, ledger: option }))}
@@ -1936,14 +2305,14 @@ export default function AhorrosScreen() {
                           flex: 1,
                           paddingVertical: 10,
                           borderRadius: 10,
-                          backgroundColor: quickTrade.ledger === option ? (option === 'none' ? '#64748b' : '#3b82f6') : cardsMain,
-                          marginRight: option === 'none' ? 8 : 0,
+                          backgroundColor: quickTrade.ledger === option ? primaryColor : cardsMain,
+                          marginRight: option === 'local' ? 8 : 0,
                           borderWidth: 1,
-                          borderColor: option === 'none' ? '#64748b' : '#3b82f6',
+                          borderColor: primaryColor,
                         }}
                       >
                         <Text style={{ color: quickTrade.ledger === option ? '#fff' : iconColor, textAlign: 'center', fontWeight: '700' }}>
-                          {option === 'none' ? 'Solo cartera' : 'A transacciones'}
+                          {option === 'local' ? 'Local' : 'Global'}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -1981,8 +2350,8 @@ export default function AhorrosScreen() {
                     <TouchableOpacity onPress={() => setQuickTrade((prev) => ({ ...prev, visible: false }))} style={[styles.btn, { backgroundColor: cardsMain, flex: 1, borderWidth: 1, borderColor: borderColor }]}>
                       <Text style={{ color: iconColor, textAlign: 'center' }}>Cancelar</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={guardarQuickTrade} style={[styles.btn, { backgroundColor: primaryColor, flex: 1 }]}>
-                      <Text style={{ color: 'white', textAlign: 'center' }}>Guardar</Text>
+                    <TouchableOpacity onPress={handleGuardarQuickTrade} disabled={savingCryptoAction} style={[styles.btn, { backgroundColor: primaryColor, flex: 1, opacity: savingCryptoAction ? 0.65 : 1 }]}> 
+                      {savingCryptoAction ? <ActivityIndicator color="white" /> : <Text style={{ color: 'white', textAlign: 'center' }}>Guardar</Text>}
                     </TouchableOpacity>
                   </View>
                 </>
@@ -2000,6 +2369,15 @@ export default function AhorrosScreen() {
         onCancel={() => setDatePickerVisible(false)}
       />
 
+      <DateTimePickerModal
+        isVisible={isCryptoDatePickerVisible}
+        mode="date"
+        maximumDate={new Date()}
+        date={cryptoFechaCompra}
+        onConfirm={handleCryptoFechaConfirm}
+        onCancel={() => setCryptoDatePickerVisible(false)}
+      />
+
       {/* Modal detalle: depositar / retirar */}
       <Modal visible={showDetalle} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setShowDetalle(false)}>
@@ -2009,11 +2387,12 @@ export default function AhorrosScreen() {
                 {selected?.nombre || "Detalle"}
               </ThemedText>
 
-              <ThemedText style={{ color: textColor, opacity: 0.7, marginBottom: 6 }}>
-                Actual: ${fmt(selected?.cantidadActual || 0)} • Meta: ${fmt(selected?.meta || 0)}
+              <ThemedText style={{ color: textColor, opacity: 0.7, marginBottom: 12 }}>
+                Disponible: ${fmt(selected?.cantidadActual || 0)} • Objetivo: ${fmt(selected?.meta || 0)}
               </ThemedText>
 
-              <View style={{ flexDirection: "row", marginBottom: 8 }}>
+              <Text style={{ color: textColor, opacity: 0.65, fontSize: 11, fontWeight: "700", marginBottom: 7 }}>MOVIMIENTO LOCAL · SOLO AHORRO</Text>
+              <View style={{ flexDirection: "row", marginBottom: 12, width: "100%", justifyContent: "space-between" }}>
                 <TouchableOpacity
                   onPress={() => setMovimientoTipo("deposito")}
                   style={[
@@ -2021,7 +2400,7 @@ export default function AhorrosScreen() {
                     movimientoTipo === "deposito" ? { backgroundColor: "#3edc81" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: movimientoTipo === "deposito" ? "black" : iconColor }}>Depositar</Text>
+                  <Text style={{ color: movimientoTipo === "deposito" ? "black" : iconColor, textAlign: "center", fontSize: 12 }}>Depósito manual</Text>
                 </TouchableOpacity>
 
                 <View style={{ width: 8 }} />
@@ -2033,11 +2412,12 @@ export default function AhorrosScreen() {
                     movimientoTipo === "retiro" ? { backgroundColor: "#ff8b8b" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: movimientoTipo === "retiro" ? "black" : iconColor }}>Retirar</Text>
-                </TouchableOpacity>
+                  <Text style={{ color: movimientoTipo === "retiro" ? "black" : iconColor, textAlign: "center", fontSize: 12 }}>Retiro manual</Text>
+                </TouchableOpacity>  
+              </View>
 
-                <View style={{ width: 8 }} />
-
+              <Text style={{ color: textColor, opacity: 0.65, fontSize: 11, fontWeight: "700", marginBottom: 7 }}>MOVIMIENTO GLOBAL · ENTRE CUENTAS</Text>
+              <View style={{ flexDirection: "row", marginBottom: 8, width: "100%", justifyContent: "space-between" }}>
                 <TouchableOpacity
                   onPress={() => setMovimientoTipo("transferencia")}
                   style={[
@@ -2045,21 +2425,18 @@ export default function AhorrosScreen() {
                     movimientoTipo === "transferencia" ? { backgroundColor: "#c084fc" } : { backgroundColor: cardsMain },
                   ]}
                 >
-                  <Text style={{ color: movimientoTipo === "transferencia" ? "black" : iconColor }}>A ahorro</Text>
+                  <Text style={{ color: movimientoTipo === "transferencia" ? "black" : iconColor, textAlign: "center", fontSize: 12 }}>Desde transacciones</Text>
                 </TouchableOpacity>
-              </View>
-
-              <View style={{ flexDirection: "row", marginBottom: 8 }}>
+                <View style={{ width: 8 }} />
                 <TouchableOpacity
                   onPress={() => setMovimientoTipo("pasarATransacciones")}
                   style={[
                     styles.smallBtn,
-                    { width: "100%" },
                     movimientoTipo === "pasarATransacciones" ? { backgroundColor: "#f59e0b" } : { backgroundColor: cardsMain },
                   ]}
                 >
                   <Text style={{ color: movimientoTipo === "pasarATransacciones" ? "black" : iconColor, textAlign: "center" }}>
-                    A transacciones
+                    Hacia transacciones
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -2082,12 +2459,12 @@ export default function AhorrosScreen() {
                 <TouchableOpacity onPress={ejecutarMovimiento} style={[styles.btn, { backgroundColor: primaryColor, flex: 1 }]}>
                   <Text style={{ color: iconColor, textAlign: "center" }}>
                     {movimientoTipo === "deposito"
-                      ? "Depositar"
+                      ? "Registrar depósito"
                       : movimientoTipo === "retiro"
-                        ? "Retirar"
+                        ? "Registrar retiro"
                         : movimientoTipo === "transferencia"
-                          ? "Transferir a ahorro"
-                          : "Pasar a transacciones"}
+                          ? "Transferir al ahorro"
+                          : "Transferir a transacciones"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -2096,7 +2473,6 @@ export default function AhorrosScreen() {
         </TouchableWithoutFeedback>
       </Modal>
     </View>
-    </KeyboardAvoidingView>
   );
 }
 

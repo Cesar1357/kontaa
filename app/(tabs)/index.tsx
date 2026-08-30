@@ -41,6 +41,7 @@ import QuickAccessPanel from '@/components/QuickAccessPanel';
 import ResumenRapido from '@/components/ResumenRapido';
 import RiesgoPresupuestoCard from '@/components/RiesgoPresupuestoCard';
 import SaludFinancieraCard from '@/components/SaludFinancieraCard';
+import { actualizarPreciosUsuario } from '@/services/cryptoService';
 import CryptoPortfolioCard from '../../components/CryptoPortfolioCard';
 
 
@@ -160,6 +161,8 @@ export default function Inicio() {
       'pieCategory',
       'cumulative',
       'trend',
+      'cryptoQuantity',
+      'savingsTotal',
     ].includes(value);
   };
 
@@ -329,19 +332,124 @@ export default function Inicio() {
       setHistorialTransactions([]);
       return;
     }
-
     const ref = collection(db, 'users', user.uid, 'transacciones');
     const q = query(ref, orderBy('fecha', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        date: (d.data() as any).fecha?.toDate?.() || null,
-      }));
-      setHistorialTransactions(data);
+
+    // We'll maintain base transactions and per-crypto movimientos, then merge them.
+    let baseTx: any[] = [];
+    const movimientosByCrypto = new Map<string, any[]>();
+    const movimientosByAhorro = new Map<string, any[]>();
+    const ahorroMovUnsubs: Record<string, () => void> = {};
+
+    const recomputeAndSet = () => {
+      const merged = [
+        ...baseTx,
+        ...Array.from(movimientosByCrypto.values()).flat(),
+        ...Array.from(movimientosByAhorro.values()).flat(),
+      ]
+        .map((t) => ({ ...t, date: t.date || (t.fecha instanceof Date ? t.fecha : t.fecha?.toDate?.()) }))
+        .sort((a: any, b: any) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0));
+      setHistorialTransactions(merged);
+    };
+
+    const unsubTrans = onSnapshot(q, (snap) => {
+      baseTx = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any), date: (d.data() as any).fecha?.toDate?.() || null }));
+      recomputeAndSet();
     });
 
-    return () => unsub();
+    // Listen cryptos and each crypto's movimientos
+    const cryptosRef = collection(db, 'users', user.uid, 'criptos');
+    const movUnsubs: Record<string, () => void> = {};
+    const unsubCryptos = onSnapshot(cryptosRef, (snap) => {
+      // unsubscribe removed crypto listeners
+      const currentIds = new Set(snap.docs.map((d) => d.id));
+      for (const k of Object.keys(movUnsubs)) {
+        if (!currentIds.has(k)) {
+          try { movUnsubs[k]?.(); } catch (e) {}
+          delete movUnsubs[k];
+          movimientosByCrypto.delete(k);
+        }
+      }
+
+      snap.docs.forEach((cryptoDoc) => {
+        const cryptoId = cryptoDoc.id;
+        const cryptoData = cryptoDoc.data() as any;
+        if (movUnsubs[cryptoId]) return; // already listening
+
+        const movRef = collection(db, 'users', user.uid, 'criptos', cryptoId, 'movimientos');
+        const movQ = query(movRef, orderBy('fecha', 'desc'));
+        movUnsubs[cryptoId] = onSnapshot(movQ, (movSnap) => {
+          const movs = movSnap.docs.map((m) => {
+            const md = m.data() as any;
+            const date = md.fecha?.toDate?.() || (md.fecha ? new Date(md.fecha) : new Date());
+            // map movimiento to a transaction-like object so charts can reuse existing builders
+            return {
+              id: `mov-${cryptoId}-${m.id}`,
+              tipo: md.tipo === 'venta' ? 'ingreso' : 'egreso', // compra -> egreso, venta -> ingreso (matches transacciones convention)
+              monto: Number(md.monto || (Number(md.cantidad || 0) * Number(md.precio || 0))),
+              descripcion: md.descripcion || (md.tipo || 'movimiento cripto'),
+              fecha: md.fecha,
+              date,
+              crypto: {
+                symbol: cryptoData.symbol || cryptoData.symbol?.toUpperCase?.() || cryptoData.name || cryptoId,
+                quantity: Number(md.cantidad || 0),
+                price: Number(md.precio || 0),
+                coinId: cryptoData.coinId || cryptoId,
+              },
+              origen: 'movimiento-cripto',
+            };
+          });
+
+          movimientosByCrypto.set(cryptoId, movs);
+          recomputeAndSet();
+        });
+      });
+    });
+
+    const ahorrosRef = collection(db, 'users', user.uid, 'ahorros');
+    const unsubAhorros = onSnapshot(ahorrosRef, (snap) => {
+      const currentIds = new Set(snap.docs.map((d) => d.id));
+      for (const ahorroId of Object.keys(ahorroMovUnsubs)) {
+        if (!currentIds.has(ahorroId)) {
+          ahorroMovUnsubs[ahorroId]?.();
+          delete ahorroMovUnsubs[ahorroId];
+          movimientosByAhorro.delete(ahorroId);
+        }
+      }
+
+      snap.docs.forEach((ahorroDoc) => {
+        if (ahorroMovUnsubs[ahorroDoc.id]) return;
+
+        const movRef = collection(db, 'users', user.uid, 'ahorros', ahorroDoc.id, 'movimientos');
+        const movQ = query(movRef, orderBy('creado', 'desc'));
+        ahorroMovUnsubs[ahorroDoc.id] = onSnapshot(movQ, (movSnap) => {
+          movimientosByAhorro.set(ahorroDoc.id, movSnap.docs.map((movementDoc) => {
+            const movement = movementDoc.data() as any;
+            const date = movement.creado?.toDate?.() || movement.fecha?.toDate?.() || new Date();
+
+            return {
+              id: `mov-ahorro-${ahorroDoc.id}-${movementDoc.id}`,
+              tipo: movement.tipo === 'retiro' || movement.tipo === 'pasarATransacciones' ? 'egreso' : 'ingreso',
+              monto: Number(movement.monto || 0),
+              descripcion: movement.nota || movement.tipo || 'Movimiento de ahorro',
+              fecha: movement.creado || movement.fecha,
+              date,
+              movimientoTipo: movement.tipo,
+              origen: 'movimiento-ahorro',
+            };
+          }));
+          recomputeAndSet();
+        });
+      });
+    });
+
+    return () => {
+      try { unsubTrans(); } catch (e) {}
+      try { unsubCryptos(); } catch (e) {}
+      try { unsubAhorros(); } catch (e) {}
+      Object.values(movUnsubs).forEach((u) => { try { u(); } catch (e) {} });
+      Object.values(ahorroMovUnsubs).forEach((u) => { try { u(); } catch (e) {} });
+    };
   }, [user?.uid]);
 
   useEffect(() => {
@@ -1076,7 +1184,9 @@ export default function Inicio() {
 
     if (section === 'health') return <SaludFinancieraCard />;
     if (section === 'crypto-portfolio') {
-      return <CryptoPortfolioCard holdings={cryptoPortfolioSummary} />;
+      return cryptoPortfolioSummary.length > 0
+        ? <CryptoPortfolioCard holdings={cryptoPortfolioSummary} />
+        : null;
     }
     if (section === 'upcoming') return <ProximosRecurrentesCard />;
     if (section === 'budget-risk') return <RiesgoPresupuestoCard />;
@@ -1097,6 +1207,12 @@ export default function Inicio() {
         const items = snap.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }));
         if (Array.isArray(items) && items.length > 0) {
           setCryptoPortfolioSummary(items);
+          // kick off background price update so summary shows fresh prices
+          try {
+            actualizarPreciosUsuario(user.uid, items).catch(() => undefined);
+          } catch (e) {
+            /* ignore */
+          }
           return;
         }
       } catch (error) {

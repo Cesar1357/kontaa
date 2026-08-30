@@ -12,6 +12,7 @@ import { db } from '../../config/firebase';
 import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from "@/hooks/useThemeColor";
+import { buildCryptoValueSeries, buildSavingsTotalSeries } from '@/services/historialService';
 import { endOfDay, format, startOfDay } from "date-fns";
 import { LinearGradient } from "expo-linear-gradient";
 import { collection, deleteDoc, doc, onSnapshot, orderBy, query } from "firebase/firestore";
@@ -27,6 +28,60 @@ const chartCardWidth = screenWidth - 24;
 const chartCardHeight = Math.max(250, Math.min(420, screenHeight * 0.56));
 const chartCardGap = 0;
 
+function CryptoHistoryChart({
+  transactions,
+  chartType,
+  chartWidth,
+  lineColor,
+  borderColor,
+}: {
+  transactions: any[];
+  chartType: 'crypto' | 'savings';
+  chartWidth: number;
+  lineColor: string;
+  borderColor: string;
+}) {
+  const rawSeries = chartType === 'crypto'
+    ? buildCryptoValueSeries(transactions)
+    : buildSavingsTotalSeries(transactions);
+  const series = rawSeries.filter((item) => Number.isFinite(item.value) && item.date instanceof Date && !Number.isNaN(item.date.getTime()));
+
+  if (series.length === 0) {
+    return <ThemedText style={{ color: '#aaa', marginTop: 16 }}>Sin datos para este periodo</ThemedText>;
+  }
+
+  if (series.length === 1) {
+    return <ThemedText style={{ color: lineColor, marginTop: 16 }}>Un movimiento registrado: {series[0].value.toFixed(chartType === 'crypto' ? 6 : 2)}</ThemedText>;
+  }
+
+  const chartSeries = series.length <= 40
+    ? series
+    : Array.from({ length: 40 }, (_, index) => series[Math.round(index * (series.length - 1) / 39)]);
+
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled style={{ marginTop: 8 }}>
+      <LineChart
+        data={chartSeries.map((item, index) => ({
+          value: item.value,
+          label: index % 2 === 0 ? format(item.date, 'dd/MM') : '',
+        }))}
+        color={lineColor}
+        thickness={2}
+        areaChart
+        curved
+        startFillColor={lineColor}
+        endFillColor={`${lineColor}00`}
+        yAxisThickness={0}
+        xAxisColor={borderColor}
+        yAxisColor={borderColor}
+        xAxisLabelTextStyle={{ color: lineColor, fontSize: 10 }}
+        noOfSections={4}
+        width={Math.max(chartWidth, chartSeries.length * 48)}
+      />
+    </ScrollView>
+  );
+}
+
 type HistorialChartKey =
   | 'overview'
   | 'bars'
@@ -35,7 +90,9 @@ type HistorialChartKey =
   | 'pieType'
   | 'pieCategory'
   | 'cumulative'
-  | 'trend';
+  | 'trend'
+  | 'cryptoQuantity'
+  | 'savingsTotal';
 
 interface HistorialChartConfig {
   key: HistorialChartKey;
@@ -51,6 +108,8 @@ const HISTORIAL_CHART_CONFIG_DEFAULT: HistorialChartConfig[] = [
   { key: 'pieCategory', visible: true },
   { key: 'cumulative', visible: true },
   { key: 'trend', visible: true },
+  { key: 'cryptoQuantity', visible: true },
+  { key: 'savingsTotal', visible: true },
 ];
 
 const HISTORIAL_CHART_META: Record<HistorialChartKey, { title: string; subtitle: string }> = {
@@ -62,6 +121,8 @@ const HISTORIAL_CHART_META: Record<HistorialChartKey, { title: string; subtitle:
   pieCategory: { title: 'Gastos por categoría', subtitle: 'Top categorías del periodo visible' },
   cumulative: { title: 'Saldo acumulado', subtitle: 'Evolución del saldo neto en el periodo' },
   trend: { title: 'Tendencia de movimientos', subtitle: 'Picos positivos y negativos por transacción' },
+  cryptoQuantity: { title: 'Cripto: valor en el tiempo', subtitle: 'Valor acumulado de tus movimientos cripto en MXN' },
+  savingsTotal: { title: 'Ahorros: saldo acumulado', subtitle: 'Evolución del total en tus metas/ahorros' },
 };
 
 export default function HistorialScreen() {
@@ -69,6 +130,8 @@ export default function HistorialScreen() {
   const { user } = useAuth();
   const userId = (user as any)?.uid as string | undefined;
   const [transacciones, setTransacciones] = useState<any[]>([]);
+  const [historialAhorros, setHistorialAhorros] = useState<any[]>([]);
+  const [historialCripto, setHistorialCripto] = useState<any[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
   const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background2');
@@ -165,15 +228,125 @@ export default function HistorialScreen() {
     const ref = collection(db, `users/${userId}/transacciones`);
     const q = query(ref, orderBy("fecha", "desc"));
 
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map((d) => ({
+    let baseTransactions: any[] = [];
+    const cryptoMovements = new Map<string, any[]>();
+    const savingsMovements = new Map<string, any[]>();
+    const movementUnsubscribers: Record<string, () => void> = {};
+    const savingsUnsubscribers: Record<string, () => void> = {};
+
+    const updateTransactions = () => {
+      const savings = Array.from(savingsMovements.values()).flat();
+      const crypto = Array.from(cryptoMovements.values()).flat();
+      const merged = [
+        ...baseTransactions,
+        ...crypto.filter((movement) => movement.ledger !== 'local' && !movement.originTransactionId),
+      ].sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0));
+      setTransacciones(merged);
+      setHistorialAhorros(savings
+        .sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0)));
+      setHistorialCripto(crypto
+        .sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0)));
+    };
+
+    const unsubTransactions = onSnapshot(q, (snap) => {
+      baseTransactions = snap.docs.map((d) => ({
         id: d.id,
         ...d.data(),
         date: d.data().fecha?.toDate?.() || null,
       }));
-      setTransacciones(data);
+      updateTransactions();
     });
-    return () => unsub();
+
+    const cryptosRef = collection(db, `users/${userId}/criptos`);
+    const unsubCryptos = onSnapshot(cryptosRef, (snap) => {
+      const currentIds = new Set(snap.docs.map((d) => d.id));
+
+      Object.keys(movementUnsubscribers).forEach((cryptoId) => {
+        if (!currentIds.has(cryptoId)) {
+          movementUnsubscribers[cryptoId]?.();
+          delete movementUnsubscribers[cryptoId];
+          cryptoMovements.delete(cryptoId);
+        }
+      });
+
+      snap.docs.forEach((cryptoDoc) => {
+        if (movementUnsubscribers[cryptoDoc.id]) return;
+
+        const cryptoData = cryptoDoc.data() as any;
+        const movementsRef = collection(db, `users/${userId}/criptos/${cryptoDoc.id}/movimientos`);
+        movementUnsubscribers[cryptoDoc.id] = onSnapshot(movementsRef, (movementSnap) => {
+          cryptoMovements.set(cryptoDoc.id, movementSnap.docs.map((movementDoc) => {
+            const movement = movementDoc.data() as any;
+            const date = movement.fecha?.toDate?.() || (movement.fecha ? new Date(movement.fecha) : new Date());
+            const isSale = movement.tipo === 'venta';
+
+            return {
+              id: `crypto-${cryptoDoc.id}-${movementDoc.id}`,
+              tipo: isSale ? 'ingreso' : 'egreso',
+              monto: Number(movement.monto || (Number(movement.cantidad || 0) * Number(movement.precio || 0))),
+              descripcion: movement.descripcion || movement.tipo || 'Movimiento cripto',
+              fecha: movement.fecha,
+              date,
+              crypto: {
+                symbol: cryptoData.symbol || cryptoDoc.id,
+                name: cryptoData.name || cryptoData.symbol || cryptoDoc.id,
+                quantity: Number(movement.cantidad || 0),
+                price: Number(movement.precio || 0),
+              },
+              originTransactionId: movement.originTransactionId || null,
+              ledger: movement.ledger || null,
+              origen: 'movimiento-cripto',
+            };
+          }));
+          updateTransactions();
+        });
+      });
+    });
+
+    const savingsRef = collection(db, `users/${userId}/ahorros`);
+    const unsubSavings = onSnapshot(savingsRef, (snap) => {
+      const currentIds = new Set(snap.docs.map((d) => d.id));
+
+      Object.keys(savingsUnsubscribers).forEach((savingId) => {
+        if (!currentIds.has(savingId)) {
+          savingsUnsubscribers[savingId]?.();
+          delete savingsUnsubscribers[savingId];
+          savingsMovements.delete(savingId);
+        }
+      });
+
+      snap.docs.forEach((savingDoc) => {
+        if (savingsUnsubscribers[savingDoc.id]) return;
+
+        const movementsRef = collection(db, `users/${userId}/ahorros/${savingDoc.id}/movimientos`);
+        savingsUnsubscribers[savingDoc.id] = onSnapshot(movementsRef, (movementSnap) => {
+          savingsMovements.set(savingDoc.id, movementSnap.docs.map((movementDoc) => {
+            const movement = movementDoc.data() as any;
+            const date = movement.creado?.toDate?.() || movement.fecha?.toDate?.() || new Date();
+
+            return {
+              id: `saving-${savingDoc.id}-${movementDoc.id}`,
+              tipo: movement.tipo === 'retiro' || movement.tipo === 'pasarATransacciones' ? 'egreso' : 'ingreso',
+              monto: Number(movement.monto || 0),
+              descripcion: movement.nota || movement.tipo || 'Movimiento de ahorro',
+              fecha: movement.creado || movement.fecha,
+              date,
+              movimientoTipo: movement.tipo,
+              origen: 'movimiento-ahorro',
+            };
+          }));
+          updateTransactions();
+        });
+      });
+    });
+
+    return () => {
+      unsubTransactions();
+      unsubCryptos();
+      unsubSavings();
+      Object.values(movementUnsubscribers).forEach((unsubscribe) => unsubscribe());
+      Object.values(savingsUnsubscribers).forEach((unsubscribe) => unsubscribe());
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -500,7 +673,7 @@ export default function HistorialScreen() {
     const amountRangeBars = amountRangeLabels.map((label, index) => ({
       label,
       value: amountRangeBuckets[index],
-      frontColor: primaryDarkColor,
+      frontColor: tintColor,
     }));
 
     return {
@@ -880,6 +1053,24 @@ export default function HistorialScreen() {
 
   const handleDeleteTransaction = (tx: any) => {
     if (!userId || !tx?.id) return;
+
+    if (tx.origen === 'transferencia-ahorro' || tx.origen === 'retiro-ahorro') {
+      Alert.alert(
+        'Transferencia de ahorro',
+        'Esta transferencia se administra desde el ahorro relacionado. Abre esa meta para eliminarla.',
+        [{ text: 'Entendido' }],
+      );
+      return;
+    }
+
+    if (tx.origen === 'movimiento-cripto' || tx.cryptoLedger === 'global' || tx.crypto?.symbol) {
+      Alert.alert(
+        'Movimiento de cripto',
+        'Este movimiento se administra desde la pantalla de Cripto. Abre el historial del activo para eliminarlo.',
+        [{ text: 'Entendido' }],
+      );
+      return;
+    }
 
     const description = tx.descripcion || 'esta transaccion';
     Alert.alert(
@@ -1664,6 +1855,26 @@ export default function HistorialScreen() {
                           width={Math.max(chartCardWidth - 20, Math.max(chartCardWidth + 100, chartSummary.trendLineData.length * 56))}
                         />
                       </ScrollView>
+                    )}
+
+                    {card.key === 'cryptoQuantity' && (
+                      <CryptoHistoryChart
+                        transactions={historialCripto}
+                        chartType="crypto"
+                        chartWidth={chartCardWidth}
+                        lineColor={tintColor}
+                        borderColor={borderColor}
+                      />
+                    )}
+
+                    {card.key === 'savingsTotal' && (
+                      <CryptoHistoryChart
+                        transactions={historialAhorros}
+                        chartType="savings"
+                        chartWidth={chartCardWidth}
+                        lineColor={tintColor}
+                        borderColor={borderColor}
+                      />
                     )}
                   </View>
                 ))}

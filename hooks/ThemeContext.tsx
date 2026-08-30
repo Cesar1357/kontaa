@@ -13,6 +13,7 @@ import { useColorScheme as useSystemColorScheme } from 'react-native';
 export type ThemeMode = 'system' | 'light' | 'dark' | 'grey';
 export type AppTheme = 'light' | 'dark' | 'grey';
 export type CryptoListViewMode = 'normal' | 'compact';
+export type CryptoChangeWindow = '24h' | '7d' | '30d' | '1y';
 
 interface ThemeContextValue {
   themeMode: ThemeMode;
@@ -25,6 +26,8 @@ interface ThemeContextValue {
   setCryptoListViewMode: (mode: CryptoListViewMode) => Promise<void>;
   cryptoHomeExpanded: boolean;
   setCryptoHomeExpanded: (expanded: boolean) => Promise<void>;
+  cryptoChangeWindow: CryptoChangeWindow;
+  setCryptoChangeWindow: (w: CryptoChangeWindow) => Promise<void>;
 }
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
@@ -32,6 +35,7 @@ const THEME_STORAGE_KEY = 'themeMode';
 const SAVINGS_VIEW_MODE_STORAGE_KEY = '@kontaa:savings-view-mode';
 const CRYPTO_LIST_VIEW_MODE_STORAGE_KEY = '@kontaa:crypto-list-view-mode';
 const CRYPTO_HOME_EXPANDED_STORAGE_KEY = '@kontaa:crypto-home-expanded';
+const CRYPTO_CHANGE_WINDOW_STORAGE_KEY = '@kontaa:crypto-change-window';
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemTheme = useSystemColorScheme();
@@ -40,6 +44,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [savingsViewMode, setSavingsViewModeState] = useState<'ahorros' | 'cripto'>('ahorros');
   const [cryptoListViewMode, setCryptoListViewModeState] = useState<CryptoListViewMode>('normal');
   const [cryptoHomeExpanded, setCryptoHomeExpandedState] = useState(true);
+  const [cryptoChangeWindow, setCryptoChangeWindowState] = useState<CryptoChangeWindow>('24h');
 
   useEffect(() => {
     const loadTheme = async () => {
@@ -77,6 +82,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         console.warn('No se pudo cargar la expansión del portafolio cripto guardada:', error);
+      }
+
+      try {
+        const storedCryptoChangeWindow = await AsyncStorage.getItem(CRYPTO_CHANGE_WINDOW_STORAGE_KEY);
+        if (storedCryptoChangeWindow === '24h' || storedCryptoChangeWindow === '7d' || storedCryptoChangeWindow === '30d' || storedCryptoChangeWindow === '1y') {
+          setCryptoChangeWindowState(storedCryptoChangeWindow);
+        }
+      } catch (error) {
+        console.warn('No se pudo cargar la ventana de cambio cripto guardada:', error);
       }
     };
 
@@ -117,6 +131,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     await AsyncStorage.setItem(CRYPTO_HOME_EXPANDED_STORAGE_KEY, String(expanded));
   }, []);
 
+  const setCryptoChangeWindow = useCallback(async (w: CryptoChangeWindow) => {
+    setCryptoChangeWindowState(w);
+    await AsyncStorage.setItem(CRYPTO_CHANGE_WINDOW_STORAGE_KEY, w);
+  }, []);
+
   const value = useMemo(
     () => ({
       themeMode,
@@ -129,8 +148,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setCryptoListViewMode,
       cryptoHomeExpanded,
       setCryptoHomeExpanded,
+      cryptoChangeWindow,
+      setCryptoChangeWindow,
     }),
-    [cryptoHomeExpanded, cryptoListViewMode, resolvedTheme, setCryptoHomeExpanded, setCryptoListViewMode, setThemeMode, savingsViewMode, setSavingsViewMode, themeMode]
+    [cryptoHomeExpanded, cryptoListViewMode, cryptoChangeWindow, resolvedTheme, setCryptoHomeExpanded, setCryptoListViewMode, setCryptoChangeWindow, setThemeMode, savingsViewMode, setSavingsViewMode, themeMode]
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

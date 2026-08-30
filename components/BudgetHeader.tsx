@@ -5,26 +5,26 @@ import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  collection,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  Timestamp,
-  where,
+    collection,
+    doc,
+    onSnapshot,
+    orderBy,
+    query,
+    Timestamp,
+    where,
 } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Dimensions,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
 } from 'react-native-reanimated';
 import { RFValue } from 'react-native-responsive-fontsize';
 
@@ -47,8 +47,6 @@ export default function PresupuestoHeader() {
   const cardsColor = useThemeColor({light:'',dark:''},'cardsMain');
   const textColor = useThemeColor({light:'',dark:''},'text');
     
-  const [actualizar, setActualizar] = useState(0);
-
   const toggleExpanded = () => {
     const next = !expanded;
     setExpanded(next);
@@ -61,23 +59,6 @@ export default function PresupuestoHeader() {
     opacity: opacity.value,
     overflow: 'hidden',
   }));
-
-  // 🔹 Escucha en tiempo real los presupuestos del usuario
-  useEffect(() => {
-  if (!user?.uid) return;
-
-  try {
-    const ref = collection(db, `users/${user.uid}/transacciones`);
-    const unsubscribe = onSnapshot(ref, (snapshot) => {
-      const data: any[] = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      setActualizar(data.length);
-    });
-
-    return () => unsubscribe();
-  } catch (e) {
-    console.error("Error en useEffect de presupuestos:", e);
-  }
-}, [user]);
 
   useEffect(() => {
     try{
@@ -95,7 +76,7 @@ export default function PresupuestoHeader() {
     } catch(e){
       console.error("Error en useEffect de presupuestos:", e);
     }
-  }, [user, actualizar]);
+  }, [user]);
 
   // 🔹 Escucha en tiempo real las transacciones dentro del rango actual
   useEffect(() => {
@@ -178,7 +159,7 @@ export default function PresupuestoHeader() {
     }catch(e){
       console.error("Error en useEffect de transacciones:", e);
     }
-  }, [user, range, presupuestos, actualizar]);
+  }, [user, range, presupuestos]);
 
   const chartConfig = {
     backgroundGradientFrom: cardsColor,

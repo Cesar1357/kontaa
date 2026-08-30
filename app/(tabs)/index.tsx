@@ -6,21 +6,21 @@ import { router } from "expo-router";
 import { useFocusEffect } from "expo-router/react-navigation";
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  BackHandler,
-  Linking,
-  NativeModules,
-  Platform,
-  StyleSheet,
-  ToastAndroid,
-  TouchableOpacity,
-  View
+    Alert,
+    Animated,
+    BackHandler,
+    Linking,
+    NativeModules,
+    Platform,
+    StyleSheet,
+    ToastAndroid,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 import { StatusBar } from 'expo-status-bar';
 import { sendEmailVerification, type User } from 'firebase/auth';
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, setDoc, Timestamp, where } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 
 import { ThemedText } from '@/components/ThemedText';
@@ -1250,7 +1250,13 @@ export default function Inicio() {
         const end = new Date(today);
         end.setHours(23, 59, 59, 999);
 
-        const snap = await getDocs(collection(db, 'users', user.uid, 'transacciones'));
+        const transactionsRef = collection(db, 'users', user.uid, 'transacciones');
+        const snap = await getDocs(query(
+          transactionsRef,
+          where('fecha', '>=', Timestamp.fromDate(start)),
+          where('fecha', '<=', Timestamp.fromDate(end)),
+          orderBy('fecha', 'desc'),
+        ));
         const transacciones = snap.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }));
 
         const filtered = transacciones.filter((item: any) => {

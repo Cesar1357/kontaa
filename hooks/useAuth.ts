@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { useSyncExternalStore } from 'react';
+import { Platform } from 'react-native';
 import { auth, db } from '../config/firebase';
 
 export interface AuthMetadata {
@@ -31,6 +32,7 @@ const initialSnapshot: UseAuthResult = {
 let snapshot = initialSnapshot;
 let initialized = false;
 const listeners = new Set<() => void>();
+const canUseAsyncStorage = Platform.OS !== 'web' || typeof window !== 'undefined';
 
 const emit = (next: Partial<UseAuthResult>) => {
   snapshot = { ...snapshot, ...next };
@@ -48,7 +50,7 @@ const initializeAuth = () => {
 
   const init = async () => {
       try {
-        const storedUser = await AsyncStorage.getItem('localUser');
+        const storedUser = canUseAsyncStorage ? await AsyncStorage.getItem('localUser') : null;
         if (storedUser) {
           const parsed = JSON.parse(storedUser) as Partial<UseAuthResult['user']> & {
             uid?: string;
@@ -100,7 +102,9 @@ const initializeAuth = () => {
             metadata: userData.metadata as AuthMetadata,
           });
 
-          await AsyncStorage.setItem('localUser', JSON.stringify(userData));
+          if (canUseAsyncStorage) {
+            await AsyncStorage.setItem('localUser', JSON.stringify(userData));
+          }
 
           await setDoc(
             doc(db, 'users', userData.uid),
@@ -113,7 +117,9 @@ const initializeAuth = () => {
           );
         } else {
           emit({ user: null, uid: '', displayname: '', correo: '', emailVerified: false, metadata: {} });
-          await AsyncStorage.removeItem('localUser');
+          if (canUseAsyncStorage) {
+            await AsyncStorage.removeItem('localUser');
+          }
         }
 
         emit({ loading: false });

@@ -528,9 +528,9 @@ export default function MetaMensualCard() {
                 flex: 1,
                 paddingVertical: 7,
                 borderRadius: 999,
-                backgroundColor: projectionMode === 'conservative' ? primaryColor : `${primaryColor}12`,
+                backgroundColor: projectionMode === 'conservative' ? primaryColor : cardsMain,
                 borderWidth: 1,
-                borderColor: projectionMode === 'conservative' ? primaryColor : `${primaryColor}22`,
+                borderColor: projectionMode === 'conservative' ? primaryColor : `${primaryColor}55`,
                 marginRight: 6,
                 alignItems: 'center',
               }}
@@ -543,9 +543,9 @@ export default function MetaMensualCard() {
                 flex: 1,
                 paddingVertical: 7,
                 borderRadius: 999,
-                backgroundColor: projectionMode === 'real' ? primaryColor : `${primaryColor}12`,
+                backgroundColor: projectionMode === 'real' ? primaryColor : cardsMain,
                 borderWidth: 1,
-                borderColor: projectionMode === 'real' ? primaryColor : `${primaryColor}22`,
+                borderColor: projectionMode === 'real' ? primaryColor : `${primaryColor}55`,
                 marginLeft: 6,
                 alignItems: 'center',
               }}

@@ -33,6 +33,7 @@ interface Props {
     preestablecidoMainNombre?: string;
     preestablecidoSubId?: string;
     preestablecidoSubNombre?: string;
+    presupuestoCategoria?: string | null;
   } | null;
 }
 
@@ -122,6 +123,13 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
     setPreestablecidoMainSeleccionado(initialData.preestablecidoMainId || null);
     setSugerenciaSeleccionada(null);
   }, [visible, initialData]);
+
+  useEffect(() => {
+    if (!visible || !initialData?.presupuestoCategoria || presupuestos.length === 0) return;
+
+    const budget = presupuestos.find((item) => item.categoria === initialData.presupuestoCategoria);
+    setPresupuestoSeleccionado(budget?.id || null);
+  }, [visible, initialData?.presupuestoCategoria, presupuestos]);
 
   useEffect(() => {
     if (!userId) return;
@@ -399,7 +407,7 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
               {preestablecidosMain.length > 0 && (
                 <View style={{ marginBottom: 10 }}>
                   <Text style={{ color: "#ccc", marginBottom: 6, fontWeight: "500" }}>
-                    Asociar a principal:
+                    Asociar a grupo:
                   </Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <TouchableOpacity

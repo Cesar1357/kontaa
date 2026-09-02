@@ -12,10 +12,11 @@ import { db } from '../../config/firebase';
 import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from "@/hooks/useThemeColor";
+import { useTransactions } from '@/hooks/useTransactions';
 import { buildCryptoValueSeries, buildSavingsTotalSeries } from '@/services/historialService';
 import { endOfDay, format, startOfDay } from "date-fns";
 import { LinearGradient } from "expo-linear-gradient";
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, deleteDoc, doc, onSnapshot } from "firebase/firestore";
 import { LineChart as LineChartKit } from 'react-native-chart-kit';
 import { ScrollView } from 'react-native-gesture-handler';
 import { BarChart, LineChart, PieChart } from "react-native-gifted-charts";
@@ -129,9 +130,11 @@ export default function HistorialScreen() {
   const { openCharts, focusChartKey } = useLocalSearchParams<{ openCharts?: string; focusChartKey?: string }>();
   const { user } = useAuth();
   const userId = (user as any)?.uid as string | undefined;
+  const transaccionesBase = useTransactions(userId);
   const [transacciones, setTransacciones] = useState<any[]>([]);
   const [historialAhorros, setHistorialAhorros] = useState<any[]>([]);
   const [historialCripto, setHistorialCripto] = useState<any[]>([]);
+  const [accionesCatalogo, setAccionesCatalogo] = useState<Record<string, any>>({});
   const [isExpanded, setIsExpanded] = useState(false);
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
   const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background2');
@@ -156,6 +159,7 @@ export default function HistorialScreen() {
 
   const [filtered, setFiltered] = useState<any[]>([]);
   const [filteredChart, setFilteredChart] = useState<any[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [chartDataLimit, setChartDataLimit] = useState<number>(30);
   const [activeChartIndex, setActiveChartIndex] = useState(0);
 
@@ -215,6 +219,21 @@ export default function HistorialScreen() {
     ),
     []
   );
+
+  useEffect(() => {
+    if (!userId) {
+      setAccionesCatalogo({});
+      return;
+    }
+
+    const actionsRef = collection(db, `users/${userId}/preestablecidosSubs`);
+    const unsubscribe = onSnapshot(actionsRef, (snapshot) => {
+      const catalog = Object.fromEntries(snapshot.docs.map((actionDoc) => [actionDoc.id, { id: actionDoc.id, ...actionDoc.data() }]));
+      setAccionesCatalogo(catalog);
+    });
+
+    return () => unsubscribe();
+  }, [userId]);
     
   const toggleExpanded = () => {
     const next = !isExpanded;
@@ -225,10 +244,6 @@ export default function HistorialScreen() {
 
   useEffect(() => {
     if (!userId) return;
-    const ref = collection(db, `users/${userId}/transacciones`);
-    const q = query(ref, orderBy("fecha", "desc"));
-
-    let baseTransactions: any[] = [];
     const cryptoMovements = new Map<string, any[]>();
     const savingsMovements = new Map<string, any[]>();
     const movementUnsubscribers: Record<string, () => void> = {};
@@ -238,7 +253,7 @@ export default function HistorialScreen() {
       const savings = Array.from(savingsMovements.values()).flat();
       const crypto = Array.from(cryptoMovements.values()).flat();
       const merged = [
-        ...baseTransactions,
+        ...transaccionesBase,
         ...crypto.filter((movement) => movement.ledger !== 'local' && !movement.originTransactionId),
       ].sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0));
       setTransacciones(merged);
@@ -247,15 +262,6 @@ export default function HistorialScreen() {
       setHistorialCripto(crypto
         .sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0)));
     };
-
-    const unsubTransactions = onSnapshot(q, (snap) => {
-      baseTransactions = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        date: d.data().fecha?.toDate?.() || null,
-      }));
-      updateTransactions();
-    });
 
     const cryptosRef = collection(db, `users/${userId}/criptos`);
     const unsubCryptos = onSnapshot(cryptosRef, (snap) => {
@@ -341,13 +347,12 @@ export default function HistorialScreen() {
     });
 
     return () => {
-      unsubTransactions();
       unsubCryptos();
       unsubSavings();
       Object.values(movementUnsubscribers).forEach((unsubscribe) => unsubscribe());
       Object.values(savingsUnsubscribers).forEach((unsubscribe) => unsubscribe());
     };
-  }, [userId]);
+  }, [userId, transaccionesBase]);
 
   useEffect(() => {
     if (!userId) {
@@ -1473,6 +1478,7 @@ export default function HistorialScreen() {
               <TouchableOpacity
                 key={tx.id}
                 activeOpacity={0.75}
+                onPress={() => tx.groupItems?.length && setExpandedGroups((prev) => ({ ...prev, [tx.id]: !prev[tx.id] }))}
                 onLongPress={() => handleDeleteTransaction(tx)}
                 style={{
                   flexDirection: "row",
@@ -1484,7 +1490,10 @@ export default function HistorialScreen() {
                   justifyContent: 'space-between',
                 }}
               >
-                <View style={{ flexDirection: "row", alignItems: "center", maxWidth: 250 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", maxWidth: 250, flex: 1 }}>
+                  {tx.groupItems?.length ? (
+                    <ThemedText style={{ fontSize: 20, marginRight: 8 }}>{tx.grupoIcono || '📦'}</ThemedText>
+                  ) : null}
                   <View style={{}}>
                     <View style={{flexDirection:"row", flexWrap: 'wrap', alignItems: 'center'}}>
                       <ThemedText allowFontScaling textBreakStrategy="simple" numberOfLines={2} style={{ fontWeight: "500", maxWidth: 185}}>
@@ -1509,6 +1518,38 @@ export default function HistorialScreen() {
                     <ThemedText style={{ color: "#aaa", fontSize: 12 }}>
                       {format(tx.date || tx.fecha?.toDate?.(), "dd/MM/yyyy")}
                     </ThemedText>
+                    {tx.groupItems?.length ? (
+                      <ThemedText style={{ color: iconColor, fontSize: 11, marginTop: 3 }}>
+                        {expandedGroups[tx.id] ? 'Ocultar productos' : `${tx.groupItems.length} productos · Ver detalle`}
+                      </ThemedText>
+                    ) : null}
+                    {tx.groupItems?.length && expandedGroups[tx.id] ? (
+                      <View style={{ marginTop: 8, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: `${primaryColor}66` }}>
+                        {tx.groupItems.map((item: any, index: number) => (
+                          <View key={`${tx.id}-group-item-${item.actionId || index}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 12 }}>
+                            {(() => {
+                              const catalogAction = accionesCatalogo[item.actionId] || {};
+                              const actionName = item.nombre || item.name || item.actionName || catalogAction.nombre || 'Producto';
+                              const actionIcon = item.icono || item.icon || item.actionIcon || catalogAction.icono || '•';
+                              const actionCategory = item.categoria || item.presupuestoCategoria || catalogAction.presupuestoCategoria;
+                              return (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6}}>
+                                  <ThemedText style={{ flex: 1, fontSize: 11 }} numberOfLines={1}>
+                                    {actionIcon} {actionName} x{item.quantity || 1}
+                                  </ThemedText>
+                                  <ThemedText style={{ fontSize: 11, color: iconColor }}>
+                                    ${(Number(item.monto || 0) * Number(item.quantity || 1)).toFixed(2)}
+                                  </ThemedText>
+                                  <ThemedText style={{ fontSize: 10, color: actionCategory ? primaryColor : iconColor }}>
+                                    {actionCategory || 'Sin presupuesto'}
+                                  </ThemedText>
+                                </View>
+                              );
+                            })()}
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
                   </View>
                 </View>
 

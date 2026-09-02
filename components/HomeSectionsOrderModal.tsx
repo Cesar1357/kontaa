@@ -7,6 +7,7 @@ import { useThemeColor } from '@/hooks/useThemeColor';
 
 export type HomeSectionKey =
   | 'quick-access'
+  | 'group-quick-access'
   | 'favorite-charts'
   | 'weekly'
   | 'health'
@@ -25,6 +26,7 @@ export interface HomeSectionConfig {
 
 export const HOME_SECTIONS_CONFIG_DEFAULT: HomeSectionConfig[] = [
   { key: 'quick-access', visible: true },
+  { key: 'group-quick-access', visible: true },
   { key: 'favorite-charts', visible: true },
   { key: 'weekly', visible: true },
   { key: 'health', visible: true },
@@ -41,6 +43,7 @@ export const HOME_SECTIONS_CONFIG_DEFAULT: HomeSectionConfig[] = [
 const SECTION_LABELS: Record<HomeSectionKey, string> = {
   'favorite-charts': 'Gráficas favoritas',
   'quick-access': 'Accesos rápidos',
+  'group-quick-access': 'Grupos rápidos',
   weekly: 'Racha y resumen',
   health: 'Salud financiera semanal',
   'crypto-portfolio': 'Portafolio cripto',

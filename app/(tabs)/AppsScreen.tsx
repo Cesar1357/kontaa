@@ -301,7 +301,7 @@ function simulateDebtPlan(inputDebts: DebtItem[], strategy: 'snowball' | 'avalan
 export default function AppsScreen() {
   const { uid } = useAuth();
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
-  const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background');
+  const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background2');
   const cardsMain = useThemeColor({ light: '', dark: '' }, 'cardsMain');
   const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
@@ -1886,7 +1886,7 @@ export default function AppsScreen() {
             const totalAmount = Math.max(mark?.income ?? 0, mark?.expense ?? 0);
             const alpha = totalAmount > 0 ? Math.min(0.88, 0.18 + Math.min(0.7, totalAmount / 5000)) : 0.12;
             const dayColor = net >= 0 ? `rgba(16, 185, 129, ${alpha})` : `rgba(239, 68, 68, ${alpha})`;
-            const textColorForDay = isToday ? primaryColor : net >= 0 ? '#10b981' : '#ef4444';
+            const textColorForDay = isToday ? '#ffffff' : net >= 0 ? '#10b981' : '#ef4444';
 
             return (
               <View
@@ -1894,13 +1894,13 @@ export default function AppsScreen() {
                 style={[
                   styles.calendarDayCell,
                   hasMovement ? { backgroundColor: dayColor, borderColor: net >= 0 ? 'rgba(16,185,129,0.45)' : 'rgba(239,68,68,0.45)' } : null,
-                  isToday && !calendarColorModeEnabled ? [styles.calendarDayCellToday, { borderColor: `${primaryColor}66`, backgroundColor: `${primaryColor}1A` }] : null,
+                  isToday ? [styles.calendarDayCellToday, { borderColor: primaryColor, backgroundColor: primaryColor }] : null,
                 ]}
               >
                 <Text
                   style={[
                     styles.calendarDayNumber,
-                    { color: isToday ? primaryColor : textColorForDay },
+                    { color: textColorForDay },
                     isToday ? styles.calendarDayNumberToday : null,
                   ]}
                 >
@@ -2723,7 +2723,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   calendarDayCellToday: {
-    borderWidth: 1,
+    borderWidth: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 3,
+    elevation: 3,
   },
   calendarDayNumber: {
     fontSize: 12,

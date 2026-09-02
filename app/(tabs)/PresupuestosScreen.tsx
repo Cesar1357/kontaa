@@ -1,8 +1,10 @@
 import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from "@/hooks/useAuth";
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from "expo-linear-gradient";
+
 import { useLocalSearchParams } from 'expo-router';
 import {
   Timestamp,
@@ -256,6 +258,18 @@ export default function PresupuestosScreen() {
     });
   };
 
+  const getTransactionBudgetAmount = (transaction: any, category?: string) => {
+    if (!transaction.groupItems?.length) {
+      return !category || transaction.presupuestoCategoria === category ? Number(transaction.monto || 0) : 0;
+    }
+
+    return transaction.groupItems.reduce((total: number, item: any) => {
+      const itemCategory = item.categoria || null;
+      if (category ? itemCategory !== category : itemCategory) return total;
+      return total + Number(item.monto || 0) * Number(item.quantity || 1);
+    }, 0);
+  };
+
   const presupuestosConGasto = presupuestos.map((p) => {
     console.log("Calculando gasto para presupuesto:", p);
     if(p.categoria === "Otros"){
@@ -277,6 +291,7 @@ export default function PresupuestosScreen() {
   // 🧾 Transacciones sin categoría o cuya categoría ya no existe
   const transaccionesRelacionadas = transacciones.filter((t) => {
     if (t.tipo !== "egreso") return false; // solo egresos
+    if (t.groupItems?.length) return t.groupItems.some((item: any) => !item.categoria || !categoriasExistentes.includes(item.categoria));
     const categoriaInexistente =
       t.presupuestoCategoria &&
       !categoriasExistentes.includes(t.presupuestoCategoria);
@@ -285,10 +300,7 @@ export default function PresupuestosScreen() {
     );
   });
 
-  const gastoTransacciones = transaccionesRelacionadas.reduce(
-    (acc, t) => acc + (t.monto || 0),
-    0
-  );
+  const gastoTransacciones = transaccionesRelacionadas.reduce((acc, t) => acc + getTransactionBudgetAmount(t), 0);
 
   const recurrentesRelacionados = gastosRecurrentes.filter((g) => {
     const categoriaInexistente =
@@ -311,12 +323,10 @@ export default function PresupuestosScreen() {
   return { ...p, gastado, pendiente: gastoPendiente, limite: limiteRestante };
     } else {
       // Transacciones normales asociadas a la categoría del presupuesto
-      const relacionadas = transacciones.filter(
-        (t) => t.tipo === "egreso" && t.presupuestoCategoria === p.categoria
-      );
+      const relacionadas = transacciones.filter((t) => t.tipo === "egreso" && getTransactionBudgetAmount(t, p.categoria) > 0);
 
       // Gasto total de esas transacciones
-      const gastoTransacciones = relacionadas.reduce((acc, t) => acc + (t.monto || 0), 0);
+      const gastoTransacciones = relacionadas.reduce((acc, t) => acc + getTransactionBudgetAmount(t, p.categoria), 0);
 
       const recurrentesRelacionados = gastosRecurrentes.filter(
         (g) => g.activo && g.categoria === p.categoria && !transaccionRecurrenteDelMes(g.id)
@@ -616,6 +626,7 @@ export default function PresupuestosScreen() {
     await setDoc(ref, {
       nombre: nuevoMainNombre.trim(),
       icono: nuevoMainIcono.trim() || "💼",
+      accesoRapido: true,
       createdAt: new Date()
     });
 
@@ -623,6 +634,14 @@ export default function PresupuestosScreen() {
     setNuevoMainIcono("");
     setNuevoMainImagen("");
     setMostrarNuevoPreestablecido(false);
+  };
+
+  const toggleGrupoAccesoRapido = async (id: string, activo: boolean) => {
+    if (!currentUserId) return;
+    await updateDoc(doc(db, `users/${currentUserId}/preestablecidosMain`, id), {
+      accesoRapido: activo,
+      updatedAt: new Date(),
+    });
   };
 
   const agregarPreestablecidoSub = async (mainId: string) => {
@@ -1047,7 +1066,7 @@ export default function PresupuestosScreen() {
             }}
           >
             <ThemedText style={{ color: "#fff", fontWeight: "600" }}>
-              {mostrarNuevoPreestablecido ? "Cancelar" : "Nuevo principal"}
+              {mostrarNuevoPreestablecido ? "Cancelar" : "Nuevo grupo"}
             </ThemedText>
           </TouchableOpacity>
 
@@ -1095,17 +1114,22 @@ export default function PresupuestosScreen() {
                         {subsMain.length} acciones
                       </Text>
                     </TouchableOpacity>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                      <TouchableOpacity onPress={() => setMainConNuevoSubId(mostrandoNuevoSub ? null : main.id)}>
-                        <Text style={{ color: "#5c6bf2", fontWeight: "600" }}>
-                          {mostrandoNuevoSub ? "Cerrar" : "Nueva acción"}
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, justifyContent: "center" }}>
+                      <TouchableOpacity onPress={() => toggleGrupoAccesoRapido(main.id, main.accesoRapido === false)}>
+                        <Text style={{ color: main.accesoRapido === false ? "#999" : "#3edc81", fontWeight: "600" }}>
+                          {main.accesoRapido === false ? "Sin acceso" : "Acceso rápido"}
                         </Text>
                       </TouchableOpacity>
+                      <TouchableOpacity onPress={() => setMainConNuevoSubId(mostrandoNuevoSub ? null : main.id)}>
+                          {mostrandoNuevoSub ? 
+                          <Ionicons name="close-outline" size={20} color="#5c6bf2" /> : 
+                          <Ionicons name="add-outline" size={20} color="#5c6bf2" />}
+                      </TouchableOpacity>
                       <TouchableOpacity onPress={() => iniciarEdicionMain(main)}>
-                        <Text style={{ color: "#5c6bf2", fontWeight: "600" }}>Editar</Text>
+                        <Ionicons name="create-outline" size={20} color="#5c6bf2" />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => eliminarPreestablecidoMain(main.id)}>
-                        <Text style={{ color: "#f87171", fontWeight: "600" }}>Eliminar</Text>
+                        <Ionicons name="trash-outline" size={20} color="red" />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1113,7 +1137,7 @@ export default function PresupuestosScreen() {
                   {editandoMainId === main.id && (
                     <Animated.View layout={Layout.springify()} style={{ backgroundColor: cardsMain, borderRadius: 12, padding: 12, marginBottom: 10 }}>
                       <TextInput
-                        placeholder="Nombre del principal"
+                        placeholder="Nombre del grupo"
                         placeholderTextColor="#888"
                         value={editarMainNombre}
                         onChangeText={setEditarMainNombre}
@@ -1128,7 +1152,7 @@ export default function PresupuestosScreen() {
                         style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 12, paddingVertical: 4 }}
                       />
                       <TouchableOpacity onPress={guardarEdicionMain} style={{ backgroundColor: "#6366f1", paddingVertical: 10, borderRadius: 10, alignItems: "center" }}>
-                        <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar principal</Text>
+                        <Text style={{ color: "#fff", fontWeight: "600" }}>Guardar grupo</Text>
                       </TouchableOpacity>
                     </Animated.View>
                   )}

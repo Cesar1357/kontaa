@@ -18,6 +18,7 @@ export default function RiesgoPresupuestoCard() {
   const [monthlySpent, setMonthlySpent] = useState(0);
   const [monthlyRecurringActualSpent, setMonthlyRecurringActualSpent] = useState(0);
   const [monthlyRecurringPendingSpent, setMonthlyRecurringPendingSpent] = useState(0);
+  const [historicalMonthlyMedian, setHistoricalMonthlyMedian] = useState(0);
 
   const toMonthlyAmount = (item: any) => {
     const amount = Number(item?.monto || 0);
@@ -37,12 +38,15 @@ export default function RiesgoPresupuestoCard() {
       setMonthlySpent(0);
       setMonthlyRecurringActualSpent(0);
       setMonthlyRecurringPendingSpent(0);
+      setHistoricalMonthlyMedian(0);
       setLoading(false);
       return;
     }
 
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const historyStart = new Date(now.getFullYear(), now.getMonth() - 3, 1, 0, 0, 0, 0);
 
     const userUnsub = onSnapshot(doc(db, 'users', userId), (userDoc) => {
       const data = userDoc.data() as any;
@@ -52,7 +56,8 @@ export default function RiesgoPresupuestoCard() {
 
     const q = query(
       collection(db, `users/${userId}/transacciones`),
-      where('fecha', '>=', Timestamp.fromDate(start)),
+      where('fecha', '>=', Timestamp.fromDate(historyStart)),
+      where('fecha', '<=', Timestamp.fromDate(end)),
       where('tipo', '==', 'egreso'),
     );
 
@@ -60,7 +65,27 @@ export default function RiesgoPresupuestoCard() {
       q,
       async (snap) => {
         try {
-          const currentMonthTransactions = snap.docs.map((d) => d.data() as any);
+          const allTransactions = snap.docs.map((d) => d.data() as any);
+          const currentMonthTransactions = allTransactions.filter((item) => {
+            const date = item.fecha?.toDate?.() || new Date(item.fecha || 0);
+            return date >= start && date <= end;
+          });
+          const historicalTotals = [0, 1, 2].map((monthOffset) => {
+            const monthStart = new Date(now.getFullYear(), now.getMonth() - monthOffset - 1, 1);
+            const monthEnd = new Date(now.getFullYear(), now.getMonth() - monthOffset, 0, 23, 59, 59, 999);
+            return allTransactions
+              .filter((item) => {
+                const date = item.fecha?.toDate?.() || new Date(item.fecha || 0);
+                return date >= monthStart && date <= monthEnd && !item?.recurrenteId;
+              })
+              .reduce((acc, item) => acc + Number(item?.monto || 0), 0);
+          }).filter((total) => total > 0).sort((a, b) => a - b);
+          const middle = Math.floor(historicalTotals.length / 2);
+          const historicalMedian = historicalTotals.length === 0
+            ? 0
+            : historicalTotals.length % 2 === 0
+              ? (historicalTotals[middle - 1] + historicalTotals[middle]) / 2
+              : historicalTotals[middle];
           const normalSpent = currentMonthTransactions
             .filter((item) => !item?.recurrenteId)
             .reduce((acc, item) => acc + Number(item?.monto || 0), 0);
@@ -78,6 +103,7 @@ export default function RiesgoPresupuestoCard() {
           setMonthlySpent(normalSpent);
           setMonthlyRecurringActualSpent(recurringActualSpent);
           setMonthlyRecurringPendingSpent(recurrentesPendientes);
+          setHistoricalMonthlyMedian(historicalMedian);
           setLoading(false);
         } catch (error) {
           console.log('No se pudo calcular riesgo de presupuesto:', error);
@@ -97,9 +123,17 @@ export default function RiesgoPresupuestoCard() {
 
   const projection = useMemo(() => {
     const now = new Date();
-    const daysPassed = Math.max(1, now.getDate());
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const projectedByTransactions = (monthlySpent / daysPassed) * daysInMonth;
+    const daysPassed = now.getDate();
+    const smoothedDays = Math.max(daysPassed, 7);
+    const currentPace = daysPassed > 0 ? (monthlySpent / daysPassed) * daysInMonth : 0;
+    const smoothedPace = (monthlySpent / smoothedDays) * daysInMonth;
+    const controlledPace = historicalMonthlyMedian > 0
+      ? daysPassed < 7
+        ? Math.min(historicalMonthlyMedian, smoothedPace)
+        : Math.min(historicalMonthlyMedian * 1.5, historicalMonthlyMedian * 0.7 + currentPace * 0.3)
+      : smoothedPace;
+    const projectedByTransactions = Math.max(monthlySpent, controlledPace);
     const projected = projectedByTransactions + monthlyRecurringActualSpent + monthlyRecurringPendingSpent;
 
     let status = 'Sin presupuesto mensual';
@@ -119,8 +153,8 @@ export default function RiesgoPresupuestoCard() {
       }
     }
 
-    return { projected, projectedByTransactions, status, color };
-  }, [monthlyBudget, monthlySpent, monthlyRecurringActualSpent, monthlyRecurringPendingSpent]);
+    return { projected, projectedByTransactions, actualSpent: monthlySpent, status, color };
+  }, [monthlyBudget, monthlySpent, monthlyRecurringActualSpent, monthlyRecurringPendingSpent, historicalMonthlyMedian]);
 
   return (
     <ThemedView
@@ -161,8 +195,8 @@ export default function RiesgoPresupuestoCard() {
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
             <View style={{ flex: 1 }}>
-              <ThemedText style={{ fontSize: 10, opacity: 0.7 }}>Transacc.</ThemedText>
-              <ThemedText style={{ fontSize: 12, fontWeight: '700' }}>${projection.projectedByTransactions.toFixed(0)}</ThemedText>
+              <ThemedText style={{ fontSize: 10, opacity: 0.7 }}>Gastado</ThemedText>
+              <ThemedText style={{ fontSize: 12, fontWeight: '700' }}>${projection.actualSpent.toFixed(0)}</ThemedText>
             </View>
             <View style={{ flex: 1, alignItems: 'center' }}>
               <ThemedText style={{ fontSize: 10, opacity: 0.7 }}>Recurrentes</ThemedText>
@@ -175,7 +209,7 @@ export default function RiesgoPresupuestoCard() {
           </View>
 
           <ThemedText style={{ fontSize: 11, opacity: 0.72 }}>
-            Incluye transacciones normales, recurrentes ya cobrados y los pendientes del calendario del mes.
+            Estima el cierre con tu historial reciente, el gasto actual y los recurrentes del mes.
           </ThemedText>
         </>
       )}

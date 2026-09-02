@@ -28,23 +28,18 @@ export default function FugasGastoCard() {
     const run = async () => {
       try {
         const now = new Date();
-        const startCurrent = new Date(now);
-        startCurrent.setDate(now.getDate() - 7);
-        startCurrent.setHours(0, 0, 0, 0);
-
-        const startPrev = new Date(now);
-        startPrev.setDate(now.getDate() - 14);
-        startPrev.setHours(0, 0, 0, 0);
+        const startCurrent = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        const endCurrent = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
         const q = query(
           collection(db, `users/${user.uid}/transacciones`),
-          where('fecha', '>=', Timestamp.fromDate(startPrev)),
+          where('fecha', '>=', Timestamp.fromDate(startCurrent)),
+          where('fecha', '<=', Timestamp.fromDate(endCurrent)),
           where('tipo', '==', 'egreso'),
         );
 
         const snap = await getDocs(q);
         const currentMap: Record<string, number> = {};
-        const prevMap: Record<string, number> = {};
 
         snap.forEach((d) => {
           const data = d.data() as any;
@@ -54,23 +49,11 @@ export default function FugasGastoCard() {
           const date = data?.fecha?.toDate ? data.fecha.toDate() : new Date(data?.fecha || 0);
           const key = String(data?.presupuestoCategoria || data?.preestablecidoSubNombre || 'Sin categoria');
 
-          if (date >= startCurrent) {
-            currentMap[key] = (currentMap[key] || 0) + amount;
-          } else {
-            prevMap[key] = (prevMap[key] || 0) + amount;
-          }
+          if (date >= startCurrent && date <= endCurrent) currentMap[key] = (currentMap[key] || 0) + amount;
         });
 
-        const keys = Array.from(new Set([...Object.keys(currentMap), ...Object.keys(prevMap)]));
-        const next = keys
-          .map((key) => {
-            const current = currentMap[key] || 0;
-            const previous = prevMap[key] || 0;
-            const delta = current - previous;
-            const growth = previous > 0 ? (delta / previous) * 100 : current > 0 ? 100 : 0;
-            return { category: key, delta, growth };
-          })
-          .filter((item) => item.delta > 0)
+        const next = Object.entries(currentMap)
+          .map(([category, delta]) => ({ category, delta, growth: 0 }))
           .sort((a, b) => b.delta - a.delta)
           .slice(0, 3);
 
@@ -105,7 +88,7 @@ export default function FugasGastoCard() {
         <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: `${primaryColor}18`, alignItems: 'center', justifyContent: 'center' }}>
           <Ionicons name="water-outline" size={18} color={primaryColor} />
         </View>
-        <ThemedText style={{ marginLeft: 8, fontSize: 15, fontWeight: '700' }}>Top fugas de gasto</ThemedText>
+        <ThemedText style={{ marginLeft: 8, fontSize: 15, fontWeight: '700' }}>Mayores gastos del mes</ThemedText>
       </View>
 
       {loading ? (
@@ -131,7 +114,7 @@ export default function FugasGastoCard() {
           >
             <ThemedText style={{ fontSize: 12, opacity: 0.88, flexShrink: 1 }}>{item.category}</ThemedText>
             <ThemedText style={{ fontSize: 12, fontWeight: '700', color: '#ef4444' }}>
-              +${item.delta.toFixed(0)} ({item.growth.toFixed(0)}%)
+              ${item.delta.toFixed(0)} este mes
             </ThemedText>
           </View>
         ))

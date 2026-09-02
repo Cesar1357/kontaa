@@ -6,32 +6,39 @@ import { router } from "expo-router";
 import { useFocusEffect } from "expo-router/react-navigation";
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    BackHandler,
-    Linking,
-    NativeModules,
-    Platform,
-    StyleSheet,
-    ToastAndroid,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  BackHandler,
+  Linking,
+  Modal,
+  NativeModules,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  ToastAndroid,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 import { StatusBar } from 'expo-status-bar';
 import { sendEmailVerification, type User } from 'firebase/auth';
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, setDoc, Timestamp, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, setDoc, Timestamp, where, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { useTransactions } from '@/hooks/useTransactions';
 
 import BalanceHeader from '@/components/BalanceHeader';
 import BudgetHeader from '@/components/BudgetHeader';
 import CardComparativa from "@/components/ComparacionUsers";
 import FugasGastoCard from '@/components/FugasGastoCard';
+import GroupQuickAccessPanel from '@/components/GroupQuickAccessPanel';
 import HistorialFavoriteChartCard, { type HistorialChartKey } from '@/components/HistorialFavoriteChartCard';
 import HomeSectionsOrderModal, { HOME_SECTIONS_CONFIG_DEFAULT, type HomeSectionConfig, type HomeSectionKey } from '@/components/HomeSectionsOrderModal';
 import MetaMensualCard from '@/components/MetaMensualCard';
@@ -47,6 +54,7 @@ import CryptoPortfolioCard from '../../components/CryptoPortfolioCard';
 
 const HOME_SECTIONS_DEFAULT: HomeSectionKey[] = [
   'quick-access',
+  'group-quick-access',
   'favorite-charts',
   'weekly',
   'health',
@@ -131,7 +139,21 @@ export default function Inicio() {
   const [isGamificationExpanded, setIsGamificationExpanded] = useState(true);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [preestablecidosRapidos, setPreestablecidosRapidos] = useState<any[]>([]);
+  const [preestablecidosAcciones, setPreestablecidosAcciones] = useState<any[]>([]);
+  const [preestablecidosGrupos, setPreestablecidosGrupos] = useState<any[]>([]);
+  const [presupuestosPersonalizados, setPresupuestosPersonalizados] = useState<any[]>([]);
+  const [grupoActivo, setGrupoActivo] = useState<any | null>(null);
+  const [grupoItems, setGrupoItems] = useState<Record<string, { selected: boolean; quantity: number }>>({});
+  const [grupoActionName, setGrupoActionName] = useState('');
+  const [grupoActionType, setGrupoActionType] = useState<'ingreso' | 'egreso'>('egreso');
+  const [grupoActionAmount, setGrupoActionAmount] = useState('');
+  const [grupoActionIcon, setGrupoActionIcon] = useState('');
+  const [grupoActionQuick, setGrupoActionQuick] = useState(false);
+  const [grupoAddActionExpanded, setGrupoAddActionExpanded] = useState(false);
+  const [grupoActionCategory, setGrupoActionCategory] = useState('');
+  const [grupoSaving, setGrupoSaving] = useState(false);
   const [historialTransactions, setHistorialTransactions] = useState<any[]>([]);
+  const transaccionesBase = useTransactions(user?.uid);
   const [favoriteCharts, setFavoriteCharts] = useState<Array<{ key: HistorialChartKey; title: string; subtitle?: string }>>([]);
   const [cryptoPortfolioSummary, setCryptoPortfolioSummary] = useState<any[]>([]);
   const [prefillTransaccion, setPrefillTransaccion] = useState<any | null>(null);
@@ -262,6 +284,20 @@ export default function Inicio() {
   }, [user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid) {
+      setPresupuestosPersonalizados([]);
+      return;
+    }
+
+    const budgetsRef = collection(db, 'users', user.uid, 'presupuestosPersonalizados');
+    const unsubscribe = onSnapshot(budgetsRef, (snapshot) => {
+      setPresupuestosPersonalizados(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  useEffect(() => {
     console.log('subscriptionActive changed:', subscriptionActive, 'subscriptionLoaded:', subscriptionLoaded, 'themeMode:', themeMode);
     if (themeMode === 'grey' && subscriptionActive !== null && subscriptionActive === false && subscriptionLoaded === true) {
       setThemeMode('system');
@@ -310,6 +346,7 @@ export default function Inicio() {
     const ref = collection(db, 'users', user.uid, 'preestablecidosSubs');
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPreestablecidosAcciones(data);
       const rapidosOrdenados = data
         .filter((item: any) => item.accesoRapido)
         .sort((a: any, b: any) => {
@@ -329,21 +366,32 @@ export default function Inicio() {
 
   useEffect(() => {
     if (!user?.uid) {
+      setPreestablecidosGrupos([]);
+      return;
+    }
+
+    const groupsRef = collection(db, 'users', user.uid, 'preestablecidosMain');
+    const unsubscribe = onSnapshot(groupsRef, (snapshot) => {
+      setPreestablecidosGrupos(snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .filter((item: any) => item.accesoRapido !== false));
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) {
       setHistorialTransactions([]);
       return;
     }
-    const ref = collection(db, 'users', user.uid, 'transacciones');
-    const q = query(ref, orderBy('fecha', 'desc'));
-
-    // We'll maintain base transactions and per-crypto movimientos, then merge them.
-    let baseTx: any[] = [];
     const movimientosByCrypto = new Map<string, any[]>();
     const movimientosByAhorro = new Map<string, any[]>();
     const ahorroMovUnsubs: Record<string, () => void> = {};
 
     const recomputeAndSet = () => {
       const merged = [
-        ...baseTx,
+        ...transaccionesBase,
         ...Array.from(movimientosByCrypto.values()).flat(),
         ...Array.from(movimientosByAhorro.values()).flat(),
       ]
@@ -351,11 +399,6 @@ export default function Inicio() {
         .sort((a: any, b: any) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0));
       setHistorialTransactions(merged);
     };
-
-    const unsubTrans = onSnapshot(q, (snap) => {
-      baseTx = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any), date: (d.data() as any).fecha?.toDate?.() || null }));
-      recomputeAndSet();
-    });
 
     // Listen cryptos and each crypto's movimientos
     const cryptosRef = collection(db, 'users', user.uid, 'criptos');
@@ -444,13 +487,12 @@ export default function Inicio() {
     });
 
     return () => {
-      try { unsubTrans(); } catch (e) {}
       try { unsubCryptos(); } catch (e) {}
       try { unsubAhorros(); } catch (e) {}
       Object.values(movUnsubs).forEach((u) => { try { u(); } catch (e) {} });
       Object.values(ahorroMovUnsubs).forEach((u) => { try { u(); } catch (e) {} });
     };
-  }, [user?.uid]);
+  }, [user?.uid, transaccionesBase]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -654,6 +696,105 @@ export default function Inicio() {
     } catch (error) {
       console.log('No se pudo registrar el acceso rápido:', error);
     }
+  };
+
+  const getGroupItems = (group: any) => {
+    return preestablecidosAcciones
+      .filter((item) => item.mainId === group.id)
+      .map((item) => ({
+        actionId: item.id,
+        nombre: item.nombre,
+        tipo: item.tipo,
+        monto: Number(item.montoDefault || 0),
+        icono: item.icono || '•',
+        categoria: item.presupuestoCategoria || null,
+        actionName: item.nombre,
+        actionIcon: item.icono || '•',
+        quantity: 1,
+      }));
+  };
+
+  const openGroupModal = (group: any) => {
+    const items = getGroupItems(group);
+    setGrupoActivo(group);
+    setGrupoItems(Object.fromEntries(items.map((item) => [item.actionId, { selected: true, quantity: 1 }])));
+  };
+
+  const ejecutarGrupo = async (group: any, choices = grupoItems) => {
+    if (!user?.uid || grupoSaving) return;
+    const items = getGroupItems(group)
+      .map((item) => ({ ...item, ...choices[item.actionId] }))
+      .filter((item) => item.selected && item.quantity > 0 && item.monto > 0);
+
+    if (items.length === 0) {
+      Alert.alert('Grupo vacío', 'Selecciona al menos un producto para registrar el grupo.');
+      return;
+    }
+
+    setGrupoSaving(true);
+    try {
+      const total = items.reduce((sum, item) => sum + item.monto * item.quantity, 0);
+      const parentRef = doc(collection(db, 'users', user.uid, 'transacciones'));
+      const batch = writeBatch(db);
+      const timestamp = Timestamp.now();
+      batch.set(parentRef, {
+        tipo: 'egreso',
+        monto: total,
+        descripcion: group.nombre,
+        categoria: 'grupo',
+        grupoId: group.id,
+        grupoNombre: group.nombre,
+        grupoIcono: group.icono || '📦',
+        groupItems: items,
+        fecha: timestamp,
+        createdAt: timestamp,
+      });
+
+      items.forEach((item) => {
+        const itemRef = doc(collection(db, 'users', user.uid, 'transacciones', parentRef.id, 'items'));
+        batch.set(itemRef, { ...item, createdAt: timestamp });
+      });
+
+      await batch.commit();
+      setGrupoActivo(null);
+      setGrupoItems({});
+      setQuickActionTick((prev) => prev + 1);
+      ToastAndroid.show('Grupo registrado', ToastAndroid.SHORT);
+    } catch (error) {
+      console.error('No se pudo registrar el grupo:', error);
+      Alert.alert('Error', 'No se pudo registrar el grupo.');
+    } finally {
+      setGrupoSaving(false);
+    }
+  };
+
+  const addActionToGroup = async () => {
+    if (!user?.uid || !grupoActivo || !grupoActionName.trim()) return;
+    const amount = Number(grupoActionAmount.replace(',', '.'));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      Alert.alert('Error', 'Ingresa un precio válido.');
+      return;
+    }
+
+    await setDoc(doc(collection(db, 'users', user.uid, 'preestablecidosSubs')), {
+      mainId: grupoActivo.id,
+      mainNombre: grupoActivo.nombre,
+      nombre: grupoActionName.trim(),
+      tipo: grupoActionType,
+      montoDefault: amount,
+      icono: grupoActionIcon.trim() || '⚡',
+      presupuestoCategoria: grupoActionType === 'egreso' ? grupoActionCategory.trim() || null : null,
+      accesoRapido: grupoActionQuick,
+      widgetStarred: false,
+      createdAt: new Date(),
+    });
+    setGrupoActionName('');
+    setGrupoActionType('egreso');
+    setGrupoActionAmount('');
+    setGrupoActionIcon('');
+    setGrupoActionQuick(false);
+    setGrupoActionCategory('');
+    setGrupoAddActionExpanded(false);
   };
 
   const ejecutarWidgetAction = async (action: any) => {
@@ -1015,6 +1156,7 @@ export default function Inicio() {
       preestablecidoMainNombre: item.mainNombre || null,
       preestablecidoSubId: item.id || null,
       preestablecidoSubNombre: item.nombre || null,
+      presupuestoCategoria: item.presupuestoCategoria || null,
     });
     setModalVisible(true);
   };
@@ -1033,6 +1175,18 @@ export default function Inicio() {
           onCreatePress={goToCreateQuickAccess}
           onQuickPress={registrarDesdePreestablecido}
           onQuickLongPress={openQuickInModal}
+        />
+      );
+    }
+
+    if (section === 'group-quick-access') {
+      return (
+        <GroupQuickAccessPanel
+          groups={preestablecidosGrupos}
+          primaryColor={primaryColor}
+          textColor={textColor}
+          onPress={(group) => ejecutarGrupo(group, Object.fromEntries(getGroupItems(group).map((item) => [item.actionId, { selected: true, quantity: 1 }]))) }
+          onLongPress={openGroupModal}
         />
       );
     }
@@ -1999,6 +2153,120 @@ export default function Inicio() {
           }
         }}
       />
+
+      <Modal
+        visible={Boolean(grupoActivo)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setGrupoActivo(null)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: cardMainColor, borderRadius: 20, padding: 18, maxHeight: '82%', borderWidth: 1, borderColor: `${primaryColor}35` }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ fontSize: 24, marginRight: 10 }}>{grupoActivo?.icono || '📦'}</Text>
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={{ fontSize: 19, fontWeight: '800' }}>{grupoActivo?.nombre}</ThemedText>
+                  <ThemedText style={{ fontSize: 11, opacity: 0.7 }}>Selecciona productos y cantidades</ThemedText>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setGrupoActivo(null)}>
+                <Ionicons name="close" size={24} color={textColor} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
+              {getGroupItems(grupoActivo || {}).map((item) => {
+                const choice = grupoItems[item.actionId] || { selected: true, quantity: 1 };
+                return (
+                  <View key={item.actionId} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${borderColor}55` }}>
+                    <TouchableOpacity
+                      onPress={() => setGrupoItems((prev) => ({ ...prev, [item.actionId]: { ...choice, selected: !choice.selected } }))}
+                      style={{ width: 26, height: 26, borderRadius: 7, marginRight: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: choice.selected ? primaryColor : `${borderColor}55` }}
+                    >
+                      {choice.selected && <Ionicons name="checkmark" size={17} color="#fff" />}
+                    </TouchableOpacity>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText style={{ fontWeight: '700' }}>{item.icono} {item.nombre}</ThemedText>
+                      <ThemedText style={{ fontSize: 11, opacity: 0.7 }}>${item.monto.toFixed(2)} · {item.categoria || 'Sin presupuesto'}</ThemedText>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <TouchableOpacity disabled={!choice.selected || choice.quantity <= 1} onPress={() => setGrupoItems((prev) => ({ ...prev, [item.actionId]: { ...choice, quantity: Math.max(1, choice.quantity - 1) } }))} style={{ padding: 7, opacity: choice.selected && choice.quantity > 1 ? 1 : 0.35 }}>
+                        <Ionicons name="remove-circle-outline" size={22} color={primaryColor} />
+                      </TouchableOpacity>
+                      <ThemedText style={{ minWidth: 24, textAlign: 'center', fontWeight: '800' }}>{choice.selected ? choice.quantity : 0}</ThemedText>
+                      <TouchableOpacity disabled={!choice.selected} onPress={() => setGrupoItems((prev) => ({ ...prev, [item.actionId]: { ...choice, quantity: choice.quantity + 1 } }))} style={{ padding: 7, opacity: choice.selected ? 1 : 0.35 }}>
+                        <Ionicons name="add-circle-outline" size={22} color={primaryColor} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+
+              <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: `${borderColor}66` }}>
+                <TouchableOpacity onPress={() => setGrupoAddActionExpanded((previous) => !previous)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <ThemedText style={{ fontSize: 12, fontWeight: '700' }}>Agregar acción al grupo</ThemedText>
+                  <Ionicons name={grupoAddActionExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={primaryColor} />
+                </TouchableOpacity>
+
+                {grupoAddActionExpanded && (
+                  <View style={{ marginTop: 12 }}>
+                    <TextInput placeholder="Nombre de la acción" placeholderTextColor={iconColor} value={grupoActionName} onChangeText={setGrupoActionName} style={{ backgroundColor: cardMainColor, color: textColor, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 8 }} />
+                    <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                      {(['ingreso', 'egreso'] as const).map((type) => (
+                        <TouchableOpacity key={type} onPress={() => setGrupoActionType(type)} style={{ flex: 1, marginRight: type === 'ingreso' ? 8 : 0, borderRadius: 10, paddingVertical: 9, alignItems: 'center', backgroundColor: grupoActionType === type ? (type === 'ingreso' ? '#3edc81' : '#ff6363') : cardMainColor }}>
+                          <ThemedText style={{ color: grupoActionType === type ? '#111' : textColor, fontWeight: '700', fontSize: 12 }}>{type === 'ingreso' ? 'Ingreso' : 'Egreso'}</ThemedText>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TextInput placeholder="Monto por defecto" placeholderTextColor={iconColor} keyboardType="decimal-pad" value={grupoActionAmount} onChangeText={setGrupoActionAmount} style={{ flex: 1, backgroundColor: cardMainColor, color: textColor, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9 }} />
+                      <TextInput placeholder="Icono" placeholderTextColor={iconColor} maxLength={2} value={grupoActionIcon} onChangeText={setGrupoActionIcon} style={{ width: 82, backgroundColor: cardMainColor, color: textColor, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9 }} />
+                    </View>
+                    {grupoActionType === 'egreso' && (
+                      <View style={{ marginTop: 10, marginBottom: 4 }}>
+                        <ThemedText style={{ fontSize: 12, fontWeight: '600', marginBottom: 7 }}>Asociar a presupuesto</ThemedText>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 8 }}>
+                          <TouchableOpacity
+                            onPress={() => setGrupoActionCategory('')}
+                            style={{ backgroundColor: !grupoActionCategory ? primaryColor : cardMainColor, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8 }}
+                          >
+                            <ThemedText style={{ color: !grupoActionCategory ? '#fff' : textColor, fontSize: 12 }}>Ninguno</ThemedText>
+                          </TouchableOpacity>
+                          {presupuestosPersonalizados.map((budget) => (
+                            <TouchableOpacity
+                              key={budget.id || budget.categoria}
+                              onPress={() => setGrupoActionCategory(grupoActionCategory === budget.categoria ? '' : budget.categoria)}
+                              style={{ backgroundColor: grupoActionCategory === budget.categoria ? primaryColor : cardMainColor, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8 }}
+                            >
+                              <ThemedText style={{ color: grupoActionCategory === budget.categoria ? '#fff' : textColor, fontSize: 12 }}>{budget.categoria}</ThemedText>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    )}
+                    <TouchableOpacity onPress={() => setGrupoActionQuick((previous) => !previous)} style={{ marginTop: 8, borderRadius: 9, paddingVertical: 9, alignItems: 'center', backgroundColor: grupoActionQuick ? '#3edc81' : cardMainColor }}>
+                      <ThemedText style={{ color: grupoActionQuick ? '#111' : textColor, fontWeight: '700', fontSize: 12 }}>{grupoActionQuick ? 'Acceso rápido: Activo' : 'Acceso rápido: Inactivo'}</ThemedText>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={addActionToGroup} style={{ marginTop: 10, borderRadius: 10, paddingVertical: 10, alignItems: 'center', backgroundColor: primaryColor }}>
+                      <ThemedText style={{ color: '#fff', fontWeight: '800' }}>Guardar acción</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+              <TouchableOpacity onPress={() => setGrupoActivo(null)} style={{ flex: 1, borderRadius: 11, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor }}>
+                <ThemedText>Cancelar</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={grupoSaving} onPress={() => ejecutarGrupo(grupoActivo, grupoItems)} style={{ flex: 1, borderRadius: 11, paddingVertical: 12, alignItems: 'center', backgroundColor: primaryColor, opacity: grupoSaving ? 0.6 : 1 }}>
+                {grupoSaving ? <ActivityIndicator color="#fff" /> : <ThemedText style={{ color: '#fff', fontWeight: '800' }}>Registrar grupo</ThemedText>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }

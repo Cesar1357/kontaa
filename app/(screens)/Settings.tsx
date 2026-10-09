@@ -76,6 +76,7 @@ export default function Settings() {
   const [isTextVisible, setIsTextVisible] = useState(false);
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [trialOfferClaimed, setTrialOfferClaimed] = useState(false);
+  const [trialStartedAt, setTrialStartedAt] = useState<Date | null>(null);
   const [selectedSupportAmount, setSelectedSupportAmount] = useState<number | 'custom'>(10);
   const [customSupportAmount, setCustomSupportAmount] = useState('');
   const [processingSubscription, setProcessingSubscription] = useState(false);
@@ -243,11 +244,13 @@ export default function Settings() {
         const supportData = (data as any).supportSubscription || null;
         const trialOfferData = (data as any).trialOffer || null;
         const claimed = Boolean(trialOfferData?.claimedAt || trialOfferData?.status === 'claimed');
+        const claimedAt = trialOfferData?.claimedAt?.toDate?.() || (trialOfferData?.claimedAt ? new Date(trialOfferData.claimedAt) : null);
         const amount = Number(supportData?.amount ?? supportData?.pendingAmount ?? 0);
         const activeTrialOfferToken = typeof trialOfferData?.offerToken === 'string' ? trialOfferData.offerToken : null;
 
         setSubscriptionData(supportData);
         setTrialOfferClaimed(claimed || Boolean(supportData?.active));
+        setTrialStartedAt(claimedAt instanceof Date && !Number.isNaN(claimedAt.getTime()) ? claimedAt : null);
         setStreakCurrent(Number(data?.streak?.current || 0));
 
         if (activeTrialOfferToken) {
@@ -1157,8 +1160,17 @@ export default function Settings() {
     { label: 'Gris', value: 'grey' as const },
   ];
 
+  const subscriptionExpiryDate = parseSubscriptionExpiryDate(subscriptionData?.expiryTime);
+  const subscriptionIsActive = Boolean(
+    (subscriptionData?.active === true || Boolean(subscriptionExpiryDate && subscriptionExpiryDate.getTime() > Date.now()))
+      && subscriptionData?.state !== 'SUBSCRIPTION_STATE_EXPIRED'
+      && subscriptionData?.state !== 'SUBSCRIPTION_STATE_CANCELED'
+  );
   const isTrialSubscription = Boolean(
-    subscriptionData?.active && Number(subscriptionData?.amount ?? subscriptionData?.pendingAmount ?? 0) === 0
+    subscriptionIsActive
+      && Number(subscriptionData?.amount ?? subscriptionData?.pendingAmount ?? 0) === 0
+      && trialStartedAt
+      && Date.now() < trialStartedAt.getTime() + 7 * 24 * 60 * 60 * 1000
   );
 
   const settingsOptions: SettingOption[] = [
@@ -1196,7 +1208,7 @@ export default function Settings() {
       icon: 'card',
       description: isTrialSubscription
         ? 'Prueba gratis activa'
-        : subscriptionData?.active
+        : subscriptionIsActive
           ? 'Activa en MXN'
           : 'Gestiona apoyo desde Google Play',
       onPress: () => openModal('subscription'),
@@ -1564,13 +1576,19 @@ export default function Settings() {
 
   const renderSubscriptionModal = () => {
     const amount = getAmountToUse();
-    const isActive = Boolean(subscriptionData?.active);
-    const isTrial = Boolean(
-      isActive && Number(subscriptionData?.amount ?? subscriptionData?.pendingAmount ?? 0) === 0
-    );
-    const isPending = Boolean(subscriptionData?.pending);
     const rawExpiryTime = subscriptionData?.expiryTime;
     const expiryDate = parseSubscriptionExpiryDate(rawExpiryTime);
+    const isActive = Boolean(
+      (subscriptionData?.active === true || Boolean(expiryDate && expiryDate.getTime() > Date.now()))
+        && subscriptionData?.state !== 'SUBSCRIPTION_STATE_EXPIRED'
+        && subscriptionData?.state !== 'SUBSCRIPTION_STATE_CANCELED'
+    );
+    const isTrial = Boolean(
+      isActive && Number(subscriptionData?.amount ?? subscriptionData?.pendingAmount ?? 0) === 0
+        && trialStartedAt
+        && Date.now() < trialStartedAt.getTime() + 7 * 24 * 60 * 60 * 1000
+    );
+    const isPending = Boolean(subscriptionData?.pending);
     const hasValidExpiryDate = Boolean(expiryDate);
     const isCanceledSubscription = Boolean(
       isActive && (
@@ -1977,7 +1995,7 @@ export default function Settings() {
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, alignItems: 'center' }}>
             <Text style={{ fontSize: 11, color: `${textColor}60`, textAlign: 'center' }}>
-              v4.0.1   | 
+              v4.0.6   | 
             </Text>
             <TouchableOpacity
               onPress={handleOpenInstagram}

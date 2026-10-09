@@ -7,28 +7,28 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { useLocalSearchParams } from 'expo-router';
 import {
-  Timestamp,
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  query,
-  setDoc,
-  updateDoc,
-  where,
+    Timestamp,
+    collection,
+    deleteDoc,
+    doc,
+    onSnapshot,
+    query,
+    setDoc,
+    updateDoc,
+    where,
 } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  NativeModules,
-  Platform,
-  Text,
-  ToastAndroid,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    NativeModules,
+    Platform,
+    Text,
+    ToastAndroid,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
 } from "react-native";
 import { ScrollView, TextInput } from "react-native-gesture-handler";
 import Animated, { Layout } from "react-native-reanimated";
@@ -39,7 +39,7 @@ export default function PresupuestosScreen() {
   const { user } = useAuth();
   const currentUserId = (user as { uid?: string } | null)?.uid ?? null;
   const params = useLocalSearchParams<{ section?: string }>();
-  const [presupuestos, setPresupuestos] = useState<any[]>([{ categoria: "Otros" }]);
+  const [presupuestos, setPresupuestos] = useState<any[]>([{ categoria: "Otros" }, { categoria: "Ahorro", temporal: true }]);
   const [presupuestoGeneral, setPresupuestoGeneral] = useState<any>({
     dia: 0,
     semana: 0,
@@ -51,6 +51,7 @@ export default function PresupuestosScreen() {
   const [nuevoLimite, setNuevoLimite] = useState("");
   const [seccionActiva, setSeccionActiva] = useState<"general" | "personalizados" | "preestablecidos" | "recurrentes">("personalizados");
   const [transacciones, setTransacciones] = useState<any[]>([]);
+  const [groupUsageTransactions, setGroupUsageTransactions] = useState<any[]>([]);
 
   const [modalEditar, setModalEditar] = useState(false);
   const [presupuestoEditar, setPresupuestoEditar] = useState<any | null>(null);
@@ -125,12 +126,33 @@ export default function PresupuestosScreen() {
       const ref = collection(db, `users/${currentUserId}/presupuestosPersonalizados`);
       const unsub = onSnapshot(ref, (snap) => {
         const data: any[] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setPresupuestos(data.concat([{ categoria: "Otros" }]));
+        const categories = new Set(data.map((item) => item.categoria));
+        setPresupuestos([
+          ...data,
+          ...(categories.has('Otros') ? [] : [{ categoria: 'Otros' }]),
+          ...(categories.has('Ahorro') ? [] : [{ categoria: 'Ahorro', temporal: true }]),
+        ]);
       });
       return () => unsub();
     } catch(e){
       console.error("Error en useEffect de presupuestos personalizados:", e);
     }
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setGroupUsageTransactions([]);
+      return;
+    }
+
+    const ref = collection(db, `users/${currentUserId}/transacciones`);
+    const unsubscribe = onSnapshot(ref, (snapshot) => {
+      setGroupUsageTransactions(snapshot.docs
+        .map((transactionDoc) => ({ id: transactionDoc.id, ...(transactionDoc.data() as any) }))
+        .filter((transaction) => transaction.grupoId));
+    });
+
+    return () => unsubscribe();
   }, [currentUserId]);
 
   // 📡 Presupuestos generales
@@ -249,6 +271,21 @@ export default function PresupuestosScreen() {
     setSeccionActiva('preestablecidos');
   }, [params.section]);
 
+  const orderedGroups = useMemo(() => {
+    const lastUsedByGroup = new Map<string, number>();
+    groupUsageTransactions.forEach((transaction) => {
+      const timestamp = transaction.fecha?.toDate?.()?.getTime?.() || (transaction.fecha ? new Date(transaction.fecha).getTime() : 0);
+      const current = lastUsedByGroup.get(transaction.grupoId) || 0;
+      if (timestamp > current) lastUsedByGroup.set(transaction.grupoId, timestamp);
+    });
+
+    return [...preestablecidosMain].sort((a, b) => {
+      const aLastUsed = lastUsedByGroup.get(a.id) || 0;
+      const bLastUsed = lastUsedByGroup.get(b.id) || 0;
+      return bLastUsed - aLastUsed || String(a.nombre || '').localeCompare(String(b.nombre || ''));
+    });
+  }, [groupUsageTransactions, preestablecidosMain]);
+
 // 🧮 Gasto de cada presupuesto personalizado (incluyendo los recurrentes activos)
   const transaccionRecurrenteDelMes = (recurrenteId: string) => {
     return transacciones.some((t) => {
@@ -260,7 +297,10 @@ export default function PresupuestosScreen() {
 
   const getTransactionBudgetAmount = (transaction: any, category?: string) => {
     if (!transaction.groupItems?.length) {
-      return !category || transaction.presupuestoCategoria === category ? Number(transaction.monto || 0) : 0;
+      const transactionCategory = transaction.origen === 'transferencia-ahorro' || transaction.origen === 'retiro-ahorro'
+        ? 'Ahorro'
+        : transaction.presupuestoCategoria;
+      return !category || transactionCategory === category ? Number(transaction.monto || 0) : 0;
     }
 
     return transaction.groupItems.reduce((total: number, item: any) => {
@@ -289,14 +329,17 @@ export default function PresupuestosScreen() {
   const categoriasExistentes = presupuestos.map((x) => x.categoria);
 
   // 🧾 Transacciones sin categoría o cuya categoría ya no existe
-  const transaccionesRelacionadas = transacciones.filter((t) => {
+    const transaccionesRelacionadas = transacciones.filter((t) => {
     if (t.tipo !== "egreso") return false; // solo egresos
     if (t.groupItems?.length) return t.groupItems.some((item: any) => !item.categoria || !categoriasExistentes.includes(item.categoria));
+    const transactionCategory = t.origen === 'transferencia-ahorro' || t.origen === 'retiro-ahorro'
+      ? 'Ahorro'
+      : t.presupuestoCategoria;
     const categoriaInexistente =
-      t.presupuestoCategoria &&
-      !categoriasExistentes.includes(t.presupuestoCategoria);
+      transactionCategory &&
+      !categoriasExistentes.includes(transactionCategory);
     return (
-      !t.presupuestoCategoria || categoriaInexistente
+      !transactionCategory || (categoriaInexistente && transactionCategory !== 'Ahorro')
     );
   });
 
@@ -613,12 +656,12 @@ export default function PresupuestosScreen() {
   const agregarPreestablecidoMain = async () => {
     if (!currentUserId) return;
     if (!subscriptionActive && preestablecidosMain.length >= FREE_LIMIT) {
-      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 principales de preestablecidos sin suscripcion.");
+      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 grupos sin suscripcion.");
       return;
     }
 
     if (!nuevoMainNombre.trim() || !nuevoMainIcono.trim()) {
-      Alert.alert("Error", "Ingresa un nombre e icono para el principal.");
+      Alert.alert("Error", "Ingresa un nombre e icono para el grupo.");
       return;
     }
 
@@ -647,12 +690,12 @@ export default function PresupuestosScreen() {
   const agregarPreestablecidoSub = async (mainId: string) => {
     if (!currentUserId) return;
     if (!subscriptionActive && preestablecidosSubs.length >= FREE_LIMIT) {
-      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 acciones preestablecidas sin suscripcion.");
+      Alert.alert("Limite de plan gratuito", "Puedes crear hasta 2 acciones de grupo sin suscripcion.");
       return;
     }
 
     if (!mainId || !nuevoSubNombre.trim() || !nuevoSubMonto || !nuevoSubIcono.trim()) {
-      Alert.alert("Error", "Completa principal, nombre, monto e icono.");
+      Alert.alert("Error", "Completa grupo, nombre, monto e icono.");
       return;
     }
 
@@ -669,7 +712,7 @@ export default function PresupuestosScreen() {
 
     await setDoc(ref, {
       mainId,
-      mainNombre: main?.nombre || "Sin principal",
+      mainNombre: main?.nombre || "Sin grupo",
       nombre: nuevoSubNombre.trim(),
       tipo: nuevoSubTipo,
       montoDefault: monto,
@@ -703,7 +746,7 @@ export default function PresupuestosScreen() {
   const guardarEdicionMain = async () => {
     if (!currentUserId || !editandoMainId) return;
     if (!editarMainNombre.trim() || !editarMainIcono.trim()) {
-      Alert.alert("Error", "Ingresa un nombre e icono válidos para el principal.");
+      Alert.alert("Error", "Ingresa un nombre e icono válidos para el grupo.");
       return;
     }
 
@@ -733,13 +776,13 @@ export default function PresupuestosScreen() {
   const guardarEdicionSub = async () => {
     if (!currentUserId || !editandoSubId) return;
     if (!editarSubNombre.trim() || !editarSubIcono.trim()) {
-      Alert.alert("Error", "Completa el nombre e icono del sub preestablecido.");
+      Alert.alert("Error", "Completa el nombre e icono de la acción.");
       return;
     }
 
     const monto = parseFloat(editarSubMonto);
     if (isNaN(monto) || monto <= 0) {
-      Alert.alert("Error", "Monto inválido para el sub preestablecido.");
+      Alert.alert("Error", "Monto inválido para la acción.");
       return;
     }
 
@@ -751,7 +794,7 @@ export default function PresupuestosScreen() {
       icono: editarSubIcono.trim() || "⚡",
       presupuestoCategoria: editarSubTipo === "egreso" ? (editarSubPresupuestoCategoria || null) : null,
       accesoRapido: editarSubRapido,
-      mainNombre: subActual?.mainNombre || "Sin principal",
+      mainNombre: subActual?.mainNombre || "Sin grupo",
       updatedAt: new Date(),
     });
 
@@ -829,7 +872,7 @@ export default function PresupuestosScreen() {
 
   const eliminarPreestablecidoMain = async (id: string) => {
     if (!currentUserId) return;
-    Alert.alert("Eliminar", "Se eliminará el principal y sus sub preestablecidos.", [
+    Alert.alert("Eliminar", "Se eliminará el grupo y sus acciones.", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Eliminar",
@@ -845,7 +888,7 @@ export default function PresupuestosScreen() {
 
   const eliminarPreestablecidoSub = async (id: string) => {
     if (!currentUserId) return;
-    Alert.alert("Eliminar", "¿Deseas eliminar este sub preestablecido?", [
+    Alert.alert("Eliminar", "¿Deseas eliminar esta acción del grupo?", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Eliminar",
@@ -971,7 +1014,7 @@ export default function PresupuestosScreen() {
                   : tipo === "personalizados"
                   ? "Personalizados"
                   : tipo === "preestablecidos"
-                  ? "Preestablecidos"
+                  ? "Grupos"
                   : "Recurrentes"}
               </ThemedText>
             </TouchableOpacity>
@@ -999,7 +1042,7 @@ export default function PresupuestosScreen() {
                   : tipo === "personalizados"
                   ? "Personalizados"
                   : tipo === "preestablecidos"
-                  ? "Preestablecidos"
+                  ? "Grupos"
                   : "Recurrentes"}
               </ThemedText>
             </TouchableOpacity>
@@ -1088,17 +1131,17 @@ export default function PresupuestosScreen() {
                 style={{ color: textColor, borderBottomColor: "#333", borderBottomWidth: 1, marginBottom: 12, paddingVertical: 4 }}
               />
               <TouchableOpacity onPress={agregarPreestablecidoMain} style={{ backgroundColor: "#6366f1", paddingVertical: 10, borderRadius: 12, alignItems: "center" }}>
-                <ThemedText style={{ color: "#fff", fontWeight: "600" }}>Guardar principal</ThemedText>
+                        <ThemedText style={{ color: "#fff", fontWeight: "600" }}>Guardar grupo</ThemedText>
               </TouchableOpacity>
             </Animated.View>
           )}
 
           {preestablecidosMain.length === 0 ? (
             <Text style={{ color: "#999", textAlign: "center", marginTop: 8 }}>
-              Aún no hay principales. Crea uno para agregar acciones.
+              Aún no hay grupos. Crea uno para agregar acciones.
             </Text>
           ) : (
-            preestablecidosMain.map((main) => {
+            orderedGroups.map((main) => {
               const subsMain = preestablecidosSubs.filter((s) => s.mainId === main.id);
               const expandido = mainExpandidoId === main.id;
               const mostrandoNuevoSub = mainConNuevoSubId === main.id;
@@ -1255,7 +1298,7 @@ export default function PresupuestosScreen() {
                   {expandido && (
                     <View>
                       {subsMain.length === 0 ? (
-                        <Text style={{ color: "#999", fontSize: 12 }}>Este principal no tiene acciones todavía.</Text>
+                        <Text style={{ color: "#999", fontSize: 12 }}>Este grupo no tiene acciones todavía.</Text>
                       ) : (
                         subsMain.map((item) => (
                           <View key={item.id} style={{ backgroundColor: cardsMain, borderRadius: 10, padding: 10, marginBottom: 8 }}>
@@ -1493,6 +1536,7 @@ export default function PresupuestosScreen() {
           )}
 
           {presupuestosConGasto.map((p) => {
+            const isTemporary = Boolean(p.temporal);
             const porcentaje = p.limite ? Math.min((p.gastado / p.limite) * 100, 100) : 0;
             const porcentajeConPrevisto = p.limite
               ? Math.min(((p.gastado + (p.pendiente || 0)) / p.limite) * 100, 100)
@@ -1507,7 +1551,7 @@ export default function PresupuestosScreen() {
 
             return (
               <View
-                key={p.id}
+                key={p.id || p.categoria}
                 style={{
                   backgroundColor: graficaFondoColor,
                   borderRadius: 16,
@@ -1526,9 +1570,10 @@ export default function PresupuestosScreen() {
                     {p.categoria}
                   </ThemedText>
                   <ThemedText style={{  }}>
-                    ${p.gastado.toFixed(2)} / ${p.limite.toFixed(2)}
+                    {isTemporary ? `Gasto: $${p.gastado.toFixed(2)} · Sin límite` : `$${p.gastado.toFixed(2)} / $${p.limite.toFixed(2)}`}
                   </ThemedText>
                 </View>
+                {!isTemporary && (
                 <View
                   style={{
                     height: 8,
@@ -1556,6 +1601,7 @@ export default function PresupuestosScreen() {
                     />
                   )}
                 </View>
+                )}
                 {p.pendiente > 0 && (
                   <ThemedText style={{ color: '#9ca3af', fontSize: 12, marginBottom: 8 }}>
                     +${p.pendiente.toFixed(2)} previsto para este mes
@@ -1568,7 +1614,7 @@ export default function PresupuestosScreen() {
                     gap: 16,
                   }}
                 >
-                  {p.categoria !== "Otros" && (
+                  {p.categoria !== "Otros" && !isTemporary && (
                     <>
                       <TouchableOpacity onPress={() => abrirModalEditar(p, "personalizado")}>
                         <Text style={{ color: "#5c6bf2", fontWeight: "600" }}>Editar</Text>

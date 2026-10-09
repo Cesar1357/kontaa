@@ -47,7 +47,11 @@ export default function FugasGastoCard() {
           if (!amount) return;
 
           const date = data?.fecha?.toDate ? data.fecha.toDate() : new Date(data?.fecha || 0);
-          const key = String(data?.presupuestoCategoria || data?.preestablecidoSubNombre || 'Sin categoria');
+          const key = String(
+            data?.origen === 'transferencia-ahorro' || data?.origen === 'retiro-ahorro'
+              ? 'Ahorro'
+              : data?.presupuestoCategoria || data?.preestablecidoSubNombre || 'Sin categoria'
+          );
 
           if (date >= startCurrent && date <= endCurrent) currentMap[key] = (currentMap[key] || 0) + amount;
         });

@@ -10,6 +10,7 @@ interface QuickAccessPanelProps {
   primaryColor: string;
   borderColor: string;
   textColor: string;
+  loaded: boolean;
   onDismissPromo: () => void;
   onCreatePress: () => void;
   onQuickPress: (item: any) => void;
@@ -22,12 +23,13 @@ export default function QuickAccessPanel({
   primaryColor,
   borderColor,
   textColor,
+  loaded,
   onDismissPromo,
   onCreatePress,
   onQuickPress,
   onQuickLongPress,
 }: QuickAccessPanelProps) {
-  if (quickActions.length === 0 && !quickAccessPromoDismissed) {
+  if (quickActions.length === 0 && !quickAccessPromoDismissed && loaded) {
     return (
       <ThemedView
         style={{
@@ -67,11 +69,15 @@ export default function QuickAccessPanel({
 
   if (quickActions.length > 0) {
     return (
-      <ThemedView style={{ width: '95%', marginTop: 10, marginBottom: 4, backgroundColor: 'transparent' }}>
-        <ThemedText style={{ fontSize: 13, fontWeight: '700', marginBottom: 8 }}>
-          Accesos rápidos
-        </ThemedText>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <ThemedView style={{ width: '95%', marginTop: 8, marginBottom: 2, backgroundColor: 'transparent' }}>
+        <ThemedView style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7, backgroundColor: 'transparent' }}>
+          <ThemedText style={{ fontSize: 13, fontWeight: '700' }}>Accesos rápidos</ThemedText>
+          <TouchableOpacity onPress={onCreatePress} style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 3, paddingHorizontal: 4 }}>
+            <Ionicons name="add-circle-outline" size={15} color={primaryColor} />
+            <ThemedText style={{ fontSize: 11, color: primaryColor, fontWeight: '700' }}>Crear</ThemedText>
+          </TouchableOpacity>
+        </ThemedView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 4 }}>
           {quickActions.map((item: any) => {
             const typeBorderColor =
               item.tipo === 'egreso' ? '#EF4444' : item.tipo === 'ingreso' ? '#22C55E' : borderColor;
@@ -82,11 +88,13 @@ export default function QuickAccessPanel({
                 onPress={() => onQuickPress(item)}
                 onLongPress={() => onQuickLongPress(item)}
                 style={{
-                  width: 78,
-                  height: 78,
-                  borderRadius: 39,
-                  marginRight: 10,
-                  padding: 8,
+                  width: 112,
+                  height: 62,
+                  borderRadius: 14,
+                  marginRight: 8,
+                  paddingHorizontal: 9,
+                  paddingVertical: 7,
+                  flexDirection: 'row',
                   justifyContent: 'center',
                   alignItems: 'center',
                   backgroundColor: `${primaryColor}16`,
@@ -94,19 +102,16 @@ export default function QuickAccessPanel({
                   borderColor: typeBorderColor,
                 }}
               >
-                <ThemedText style={{ fontSize: 18, marginBottom: 2 }}>
+                <ThemedText style={{ fontSize: 18, marginRight: 7 }}>
                   {item.icono || '⚡'}
                 </ThemedText>
-                <ThemedText style={{ fontSize: 10, fontWeight: '700', textAlign: 'center' }} numberOfLines={2}>
+                <ThemedText style={{ flex: 1, fontSize: 10, fontWeight: '700' }} numberOfLines={2}>
                   {item.nombre}
                 </ThemedText>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
-        <ThemedText style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>
-          Toque rápido: registra al instante. Mantén presionado para abrir el modal editable.
-        </ThemedText>
       </ThemedView>
     );
   }

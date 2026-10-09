@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   headline: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: '700',
     lineHeight: 34,
     marginBottom: 8,

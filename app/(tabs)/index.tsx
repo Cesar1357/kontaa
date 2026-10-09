@@ -39,7 +39,7 @@ import BudgetHeader from '@/components/BudgetHeader';
 import CardComparativa from "@/components/ComparacionUsers";
 import FugasGastoCard from '@/components/FugasGastoCard';
 import GroupQuickAccessPanel from '@/components/GroupQuickAccessPanel';
-import HistorialFavoriteChartCard, { type HistorialChartKey } from '@/components/HistorialFavoriteChartCard';
+import { AnalysisShortcutCard } from '@/components/HistorialFavoriteChartCard';
 import HomeSectionsOrderModal, { HOME_SECTIONS_CONFIG_DEFAULT, type HomeSectionConfig, type HomeSectionKey } from '@/components/HomeSectionsOrderModal';
 import MetaMensualCard from '@/components/MetaMensualCard';
 import NuevaTransaccionModal from "@/components/NuevaTransaccionModal";
@@ -67,6 +67,17 @@ const HOME_SECTIONS_DEFAULT: HomeSectionKey[] = [
   'summary',
   'compare',
 ];
+
+const isSupportSubscriptionActive = (support: any) => {
+  if (!support) return false;
+  const expiry = support.expiryTime?.toDate?.() || (support.expiryTime ? new Date(support.expiryTime) : null);
+  if (expiry instanceof Date && !Number.isNaN(expiry.getTime())) {
+    return expiry.getTime() > Date.now()
+      && support.state !== 'SUBSCRIPTION_STATE_EXPIRED'
+      && support.state !== 'SUBSCRIPTION_STATE_CANCELED';
+  }
+  return support.active === true;
+};
 
 const ONBOARDING_STEPS = [
   {
@@ -133,17 +144,23 @@ export default function Inicio() {
     challengeMessage: 'Registra tu primer movimiento para empezar.',
   });
   const [celebrationVisible, setCelebrationVisible] = useState(false);
+  const [trialOfferModalVisible, setTrialOfferModalVisible] = useState(false);
   const [celebrationMessage, setCelebrationMessage] = useState('');
   const [celebrationAction, setCelebrationAction] = useState<{ label: string; onPress: () => void } | null>(null);
   const [cardPulse, setCardPulse] = useState(false);
   const [isGamificationExpanded, setIsGamificationExpanded] = useState(true);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [preestablecidosRapidos, setPreestablecidosRapidos] = useState<any[]>([]);
+  const [preestablecidosRapidosLoaded, setPreestablecidosRapidosLoaded] = useState(false);
+
   const [preestablecidosAcciones, setPreestablecidosAcciones] = useState<any[]>([]);
   const [preestablecidosGrupos, setPreestablecidosGrupos] = useState<any[]>([]);
+  const [quickUsage, setQuickUsage] = useState<Record<string, { count: number; lastUsed: number }>>({});
   const [presupuestosPersonalizados, setPresupuestosPersonalizados] = useState<any[]>([]);
   const [grupoActivo, setGrupoActivo] = useState<any | null>(null);
   const [grupoItems, setGrupoItems] = useState<Record<string, { selected: boolean; quantity: number }>>({});
+  const [grupoSearch, setGrupoSearch] = useState('');
+  const [grupoSort, setGrupoSort] = useState<'mostBought' |'newest' | 'oldest' | 'leastBought'>('mostBought');
   const [grupoActionName, setGrupoActionName] = useState('');
   const [grupoActionType, setGrupoActionType] = useState<'ingreso' | 'egreso'>('egreso');
   const [grupoActionAmount, setGrupoActionAmount] = useState('');
@@ -154,7 +171,7 @@ export default function Inicio() {
   const [grupoSaving, setGrupoSaving] = useState(false);
   const [historialTransactions, setHistorialTransactions] = useState<any[]>([]);
   const transaccionesBase = useTransactions(user?.uid);
-  const [favoriteCharts, setFavoriteCharts] = useState<Array<{ key: HistorialChartKey; title: string; subtitle?: string }>>([]);
+  const [favoriteCharts, setFavoriteCharts] = useState<Array<{ key: string; title: string; subtitle?: string }>>([]);
   const [cryptoPortfolioSummary, setCryptoPortfolioSummary] = useState<any[]>([]);
   const [prefillTransaccion, setPrefillTransaccion] = useState<any | null>(null);
   const [quickActionTick, setQuickActionTick] = useState(0);
@@ -173,25 +190,22 @@ export default function Inicio() {
   const [sendingVerification, setSendingVerification] = useState(false);
   const handledWidgetActionRef = useRef<Set<string>>(new Set());
 
-  const isHistorialChartKey = (value: string): value is HistorialChartKey => {
+  const isHistorialChartKey = (value: string) => {
     return [
-      'overview',
-      'bars',
-      'weekdayActivity',
-      'amountRanges',
-      'pieType',
-      'pieCategory',
-      'cumulative',
-      'trend',
-      'cryptoQuantity',
-      'savingsTotal',
+      'analysis-overview',
+      'analysis-insights',
+      'analysis-activity',
+      'analysis-budgets',
+      'analysis-trend',
+      'analysis-flow',
+      'analysis-categories',
     ].includes(value);
   };
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const celebrationAnim = useRef(new Animated.Value(0)).current;
   const cardPulseAnim = useRef(new Animated.Value(1)).current;
-  const confettiAnims = useRef(Array.from({ length: 10 }, () => new Animated.Value(0))).current;
+  const confettiAnims = useRef(Array.from({ length: 20 }, () => new Animated.Value(0))).current;
   const lastMilestoneRef = useRef<number | null>(null);
   const weeklyTargetSeenRef = useRef(false);
 
@@ -262,6 +276,27 @@ export default function Inicio() {
   }, [authResolved, user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid) return;
+
+    const loadPromoPreference = async () => {
+      if(user?.uid && subscriptionLoaded !== null) {
+        try {
+          const key = `konta.quickAccessPromo.dismissed.${user.uid}`;
+          const dismissed = await AsyncStorage.getItem(key);
+          console.log('Cargando preferencia del anuncio de accesos rápidos:', dismissed);
+          if (dismissed !== null) {
+            setQuickAccessPromoDismissed(dismissed === 'true');
+          }
+        } catch (error) {
+          console.log('No se pudo cargar la preferencia del anuncio de accesos rápidos:', error);
+        }
+      }
+    };
+
+    loadPromoPreference();
+  }, [user?.uid, quickAccessPromoDismissed, subscriptionLoaded]);
+
+  useEffect(() => {
     if (!user?.uid) {
         setSubscriptionLoaded(null);
       return;
@@ -273,9 +308,10 @@ export default function Inicio() {
       const support = (data as any).supportSubscription;
       const trialOfferData = (data as any).trialOffer || null;
       const claimed = Boolean(trialOfferData?.claimedAt || trialOfferData?.status === 'claimed');
-      setTrialOfferClaimed(claimed || Boolean(support?.active));
-      if (support?.active !== undefined) {
-        setSubscriptionActive(Boolean(support?.active));
+      const supportActive = isSupportSubscriptionActive(support);
+      setTrialOfferClaimed(claimed || supportActive);
+      if (support?.active !== undefined || support?.state || support?.expiryTime) {
+        setSubscriptionActive(supportActive);
         setSubscriptionLoaded(true);
       }
     });
@@ -359,6 +395,7 @@ export default function Inicio() {
         });
 
       setPreestablecidosRapidos(rapidosOrdenados);
+      setPreestablecidosRapidosLoaded(true);
     });
 
     return () => unsub();
@@ -378,6 +415,22 @@ export default function Inicio() {
     });
 
     return () => unsubscribe();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setQuickUsage({});
+      return;
+    }
+
+    AsyncStorage.getItem(`konta.quickUsage.${user.uid}`).then((raw) => {
+      if (!raw) return;
+      try {
+        setQuickUsage(JSON.parse(raw));
+      } catch (error) {
+        console.log('No se pudo cargar el uso de accesos rapidos:', error);
+      }
+    });
   }, [user?.uid]);
 
   useEffect(() => {
@@ -494,21 +547,7 @@ export default function Inicio() {
     };
   }, [user?.uid, transaccionesBase]);
 
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    const loadPromoPreference = async () => {
-      try {
-        const key = `konta.quickAccessPromo.dismissed.${user.uid}`;
-        const dismissed = await AsyncStorage.getItem(key);
-        setQuickAccessPromoDismissed(dismissed === 'true');
-      } catch (error) {
-        console.log('No se pudo cargar la preferencia del anuncio de accesos rápidos:', error);
-      }
-    };
-
-    loadPromoPreference();
-  }, [user?.uid]);
+  
 
   useEffect(() => {
     if (!user?.uid) {
@@ -564,7 +603,7 @@ export default function Inicio() {
         }
         const parsed = JSON.parse(raw) as Array<{ key: string; title: string; subtitle?: string }>;
         const valid = Array.isArray(parsed)
-          ? parsed.filter((item) => isHistorialChartKey(item.key)) as Array<{ key: HistorialChartKey; title: string; subtitle?: string }>
+          ? parsed.filter((item) => isHistorialChartKey(item.key))
           : [];
         setFavoriteCharts(valid);
       } catch (error) {
@@ -589,7 +628,7 @@ export default function Inicio() {
           }
           const parsed = JSON.parse(raw) as Array<{ key: string; title: string; subtitle?: string }>;
           const valid = Array.isArray(parsed)
-            ? parsed.filter((item) => isHistorialChartKey(item.key)) as Array<{ key: HistorialChartKey; title: string; subtitle?: string }>
+            ? parsed.filter((item) => isHistorialChartKey(item.key))
             : [];
           setFavoriteCharts(valid);
         } catch (error) {
@@ -677,8 +716,36 @@ export default function Inicio() {
     }
   };
 
+  const registerQuickUsage = async (kind: 'action' | 'group', id: string) => {
+    if (!user?.uid || !id) return;
+
+    const key = `${kind}:${id}`;
+    const next = {
+      ...quickUsage,
+      [key]: {
+        count: (quickUsage[key]?.count || 0) + 1,
+        lastUsed: Date.now(),
+      },
+    };
+    setQuickUsage(next);
+    try {
+      await AsyncStorage.setItem(`konta.quickUsage.${user.uid}`, JSON.stringify(next));
+    } catch (error) {
+      console.log('No se pudo guardar el uso de accesos rapidos:', error);
+    }
+  };
+
+  const sortByQuickUsage = (items: any[], kind: 'action' | 'group') => {
+    return [...items].sort((a, b) => {
+      const aUsage = quickUsage[`${kind}:${a.id}`] || { count: 0, lastUsed: 0 };
+      const bUsage = quickUsage[`${kind}:${b.id}`] || { count: 0, lastUsed: 0 };
+      return bUsage.count - aUsage.count || bUsage.lastUsed - aUsage.lastUsed;
+    });
+  };
+
   const registrarDesdePreestablecido = async (item: any) => {
     if (!user?.uid) return;
+    await registerQuickUsage('action', item.id);
     try {
       await addDoc(collection(db, 'users', user.uid, 'transacciones'), {
         descripcion: item.nombre || 'Movimiento rápido',
@@ -701,23 +768,82 @@ export default function Inicio() {
   const getGroupItems = (group: any) => {
     return preestablecidosAcciones
       .filter((item) => item.mainId === group.id)
-      .map((item) => ({
-        actionId: item.id,
-        nombre: item.nombre,
-        tipo: item.tipo,
-        monto: Number(item.montoDefault || 0),
-        icono: item.icono || '•',
-        categoria: item.presupuestoCategoria || null,
-        actionName: item.nombre,
-        actionIcon: item.icono || '•',
-        quantity: 1,
-      }));
+      .map((item) => {
+        const purchaseCount = historialTransactions.reduce((total, transaction) => {
+          if (!Array.isArray(transaction.groupItems)) return total;
+          return total + transaction.groupItems
+            .filter((groupItem: any) => groupItem.actionId === item.id)
+            .reduce((quantity: number, groupItem: any) => quantity + Number(groupItem.quantity || 1), 0);
+        }, 0);
+
+        return {
+          actionId: item.id,
+          nombre: item.nombre,
+          tipo: item.tipo,
+          monto: Number(item.montoDefault || 0),
+          icono: item.icono || '•',
+          categoria: item.presupuestoCategoria || null,
+          createdAt: item.createdAt || null,
+          purchaseCount,
+          actionName: item.nombre,
+          actionIcon: item.icono || '•',
+          mainId: item.mainId || group.id,
+          mainNombre: item.mainNombre || group.nombre,
+          preestablecidoMainId: item.mainId || group.id,
+          preestablecidoMainNombre: item.mainNombre || group.nombre,
+          preestablecidoSubId: item.id,
+          preestablecidoSubNombre: item.nombre,
+          quantity: 1,
+        };
+      });
+  };
+
+  const getTimestampMillis = (value: any) => {
+    if (value?.toMillis) return value.toMillis();
+    if (value?.seconds) return Number(value.seconds) * 1000;
+    const parsed = value ? new Date(value).getTime() : 0;
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const getSavedGroupChoices = async (group: any) => {
+    const items = getGroupItems(group);
+    const fallback = Object.fromEntries(items.map((item) => [item.actionId, { selected: true, quantity: 1 }]));
+    if (!user?.uid) return fallback;
+
+    try {
+      const raw = await AsyncStorage.getItem(`konta.groupSelection.${user.uid}.${group.id}`);
+      if (!raw) return fallback;
+      const saved = JSON.parse(raw) as Record<string, { selected: boolean; quantity: number }>;
+      return Object.fromEntries(items.map((item) => [item.actionId, saved[item.actionId] || fallback[item.actionId]]));
+    } catch (error) {
+      console.log('No se pudo cargar la selección guardada del grupo:', error);
+      return fallback;
+    }
+  };
+
+  const getVisibleGroupItems = (group: any) => {
+    const search = grupoSearch.trim().toLowerCase();
+    const filteredItems = !search ? getGroupItems(group) : getGroupItems(group).filter((item) => (
+      `${item.nombre} ${item.categoria || ''}`.toLowerCase().includes(search)
+    ));
+
+    return [...filteredItems].sort((a, b) => {
+      if (grupoSort === 'mostBought' || grupoSort === 'leastBought') {
+        const purchaseDifference = a.purchaseCount - b.purchaseCount;
+        if (purchaseDifference !== 0) return grupoSort === 'mostBought' ? -purchaseDifference : purchaseDifference;
+      }
+
+      const dateDifference = getTimestampMillis(a.createdAt) - getTimestampMillis(b.createdAt);
+      if (dateDifference !== 0) return grupoSort === 'oldest' ? dateDifference : -dateDifference;
+      return a.nombre.localeCompare(b.nombre);
+    });
   };
 
   const openGroupModal = (group: any) => {
-    const items = getGroupItems(group);
     setGrupoActivo(group);
-    setGrupoItems(Object.fromEntries(items.map((item) => [item.actionId, { selected: true, quantity: 1 }])));
+    setGrupoSearch('');
+    setGrupoSort('mostBought');
+    getSavedGroupChoices(group).then((choices) => setGrupoItems(choices));
   };
 
   const ejecutarGrupo = async (group: any, choices = grupoItems) => {
@@ -733,6 +859,10 @@ export default function Inicio() {
 
     setGrupoSaving(true);
     try {
+      await registerQuickUsage('group', group.id);
+      if (user?.uid) {
+        await AsyncStorage.setItem(`konta.groupSelection.${user.uid}.${group.id}`, JSON.stringify(choices));
+      }
       const total = items.reduce((sum, item) => sum + item.monto * item.quantity, 0);
       const parentRef = doc(collection(db, 'users', user.uid, 'transacciones'));
       const batch = writeBatch(db);
@@ -745,6 +875,8 @@ export default function Inicio() {
         grupoId: group.id,
         grupoNombre: group.nombre,
         grupoIcono: group.icono || '📦',
+        preestablecidoMainId: group.id,
+        preestablecidoMainNombre: group.nombre,
         groupItems: items,
         fecha: timestamp,
         createdAt: timestamp,
@@ -758,6 +890,7 @@ export default function Inicio() {
       await batch.commit();
       setGrupoActivo(null);
       setGrupoItems({});
+      setGrupoSearch('');
       setQuickActionTick((prev) => prev + 1);
       ToastAndroid.show('Grupo registrado', ToastAndroid.SHORT);
     } catch (error) {
@@ -975,6 +1108,7 @@ export default function Inicio() {
   };
 
   const handleOpenTrialOffer = () => {
+    setTrialOfferModalVisible(false);
     setCelebrationVisible(false);
     setCelebrationAction(null);
     router.push({ pathname: '/(screens)/Settings', params: { openSubscription: '1' } });
@@ -1166,11 +1300,12 @@ export default function Inicio() {
     if (section === 'quick-access') {
       return (
         <QuickAccessPanel
-          quickActions={preestablecidosRapidos}
+          quickActions={sortByQuickUsage(preestablecidosRapidos, 'action')}
           quickAccessPromoDismissed={quickAccessPromoDismissed}
           primaryColor={primaryColor}
           borderColor={borderColor}
           textColor={textColor}
+          loaded={preestablecidosRapidosLoaded}
           onDismissPromo={dismissQuickAccessPromo}
           onCreatePress={goToCreateQuickAccess}
           onQuickPress={registrarDesdePreestablecido}
@@ -1182,10 +1317,13 @@ export default function Inicio() {
     if (section === 'group-quick-access') {
       return (
         <GroupQuickAccessPanel
-          groups={preestablecidosGrupos}
+          groups={sortByQuickUsage(preestablecidosGrupos, 'group')}
           primaryColor={primaryColor}
           textColor={textColor}
-          onPress={(group) => ejecutarGrupo(group, Object.fromEntries(getGroupItems(group).map((item) => [item.actionId, { selected: true, quantity: 1 }]))) }
+          onPress={async (group) => {
+            const choices = await getSavedGroupChoices(group);
+            await ejecutarGrupo(group, choices);
+          }}
           onLongPress={openGroupModal}
         />
       );
@@ -1200,32 +1338,27 @@ export default function Inicio() {
             backgroundColor: cardMainColor,
             borderRadius: 18,
             padding: 14,
+            marginTop: 12,
             marginBottom: 12,
             borderWidth: 1,
             borderColor: `${primaryColor}22`,
             width: '95%',
           }}
         >
-          <ThemedText style={{ fontSize: 16, fontWeight: '700', marginBottom: 4 }}>Graficas favoritas</ThemedText>
+          <ThemedText style={{ fontSize: 16, fontWeight: '700', marginBottom: 4 }}>Análisis financiero</ThemedText>
           <ThemedText style={{ fontSize: 12, opacity: 0.8, marginBottom: 10 }}>
-            Tus accesos directos de Historial.
+            Acceso directo a tus métricas y tendencias.
           </ThemedText>
-
-          {favoriteCharts.map((item) => (
-            <HistorialFavoriteChartCard
-              key={`favorite-chart-${item.key}`}
-              chartKey={item.key}
-              title={item.title}
-              subtitle={item.subtitle}
-              transactions={historialTransactions}
-              onPress={() =>
-                router.push({
-                  pathname: '/(tabs)/HistorialScreen',
-                  params: { openCharts: '1', focusChartKey: item.key },
-                })
-              }
-            />
-          ))}
+          <View style={{ gap: 8 }}>
+            {favoriteCharts.map((item) => (
+              <AnalysisShortcutCard
+                key={`analysis-favorite-${item.key}`}
+                title={item.title}
+                subtitle={item.subtitle}
+                onPress={() => router.push('/(screens)/AnalisisScreen')}
+              />
+            ))}
+          </View>
         </ThemedView>
       );
     }
@@ -1450,7 +1583,10 @@ export default function Inicio() {
         }
 
         const nextLongest = Math.max(Number(previous.longest || 0), nextCurrent);
-        const trialOfferAvailable = nextCurrent >= 3 && !subscriptionActive && !trialOfferClaimed;
+        const trialOfferAvailable = nextCurrent >= 3
+          && subscriptionLoaded === true
+          && subscriptionActive === false
+          && !trialOfferClaimed;
         const nextMessage = nextCurrent >= 7
           ? `¡Racha de ${nextCurrent} días! Sigue así.`
           : trialOfferAvailable
@@ -1475,36 +1611,37 @@ export default function Inicio() {
         const streakMilestoneReached = nextCurrent >= 3 && lastMilestoneRef.current !== nextCurrent;
         const weeklyGoalUnlocked = weeklyTargetMet && !weeklyTargetSeenRef.current;
 
-        if (streakMilestoneReached) {
-          lastMilestoneRef.current = nextCurrent;
-          const isTrialMilestone = nextCurrent >= 3;
-          setCelebrationMessage(
-            isTrialMilestone
-              ? '¡Tu prueba gratis ya está lista!'
-              : `¡Logro desbloqueado! Racha de ${nextCurrent} días.`
-          );
-          setCelebrationAction(
-            isTrialMilestone
-              ? { label: 'Ver oferta', onPress: handleOpenTrialOffer }
-              : null
-          );
-          setCelebrationVisible(true);
-          setCardPulse(true);
-          try {
-            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          } catch (error) {
-            console.log('No se pudo activar la vibración de logro:', error);
-          }
-        } else if (weeklyGoalUnlocked) {
-          weeklyTargetSeenRef.current = true;
-          setCelebrationMessage(`¡Meta semanal cumplida! ${filtered.length} movimientos.`);
-          setCelebrationAction(null);
-          setCelebrationVisible(true);
-          setCardPulse(true);
-          try {
-            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          } catch (error) {
-            console.log('No se pudo activar la vibración de logro:', error);
+        if(todayKey !== previous.lastActiveDate) {
+          if (streakMilestoneReached && trialOfferAvailable) {
+            lastMilestoneRef.current = nextCurrent;
+            setTrialOfferModalVisible(true);
+            setCelebrationVisible(false);
+            setCelebrationAction(null);
+            setCardPulse(true);
+          } else if (streakMilestoneReached) {
+            lastMilestoneRef.current = nextCurrent;
+            setCelebrationMessage(
+              `¡Logro desbloqueado! Racha de ${nextCurrent} días.`
+            );
+            setCelebrationAction(null);
+            setCelebrationVisible(true);
+            setCardPulse(true);
+            try {
+              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (error) {
+              console.log('No se pudo activar la vibración de logro:', error);
+            }
+          } else if (weeklyGoalUnlocked) {
+            weeklyTargetSeenRef.current = true;
+            setCelebrationMessage(`¡Meta semanal cumplida! ${filtered.length} movimientos.`);
+            setCelebrationAction(null);
+            setCelebrationVisible(true);
+            setCardPulse(true);
+            try {
+              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (error) {
+              console.log('No se pudo activar la vibración de logro:', error);
+            }
           }
         }
 
@@ -1535,7 +1672,7 @@ export default function Inicio() {
     };
 
     loadWeeklyInsight();
-  }, [user?.uid, modalVisible, quickActionTick]);
+  }, [user?.uid, modalVisible, quickActionTick, subscriptionActive, subscriptionLoaded, trialOfferClaimed]);
 
   useEffect(() => {
     if (!celebrationVisible) return;
@@ -1566,7 +1703,7 @@ export default function Inicio() {
         Animated.timing(celebrationAnim, {
           toValue: 0,
           duration: 240,
-          delay: 3000,
+          delay: 2000,
           useNativeDriver: true,
         }),
       ]),
@@ -1612,6 +1749,30 @@ export default function Inicio() {
     return () => scrollY.removeListener(listener);
   }, [scrollY]);
 
+  const isLongDisplayName = String(user?.displayName || 'Usuario').trim().length > 12;
+  const headerGreeting = (
+    <View style={{ padding: 5, flexDirection: 'row', alignItems: 'center' }}>
+      {subscriptionActive && (
+        <Ionicons name="diamond" size={20} color="#16a34a" style={{ marginRight: 8 }} />
+      )}
+      <ThemedText adjustsFontSizeToFit={true} numberOfLines={1} minimumFontScale={0.9} style={{ fontSize: 30, fontWeight: '800', color: subscriptionActive ? '#16a34a' : textColor, width: isLongDisplayName ? 300 : 200 }}>
+        Hola {user ? user.displayName : 'Usuario'}
+      </ThemedText>
+    </View>
+  );
+  const headerControls = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, bottom: 5 }}>
+      <TouchableOpacity disabled={isHeaderHidden} onPress={() => router.push('/(screens)/GlobalSearchScreen')} accessibilityLabel="Buscar en Konta" accessibilityHint="Busca transacciones, grupos, metas y recurrentes" style={{ padding: 6 }}>
+        <Ionicons name="search-outline" size={23} color={textColor} />
+      </TouchableOpacity>
+      <TouchableOpacity disabled={isHeaderHidden} onPress={() => router.push('/(screens)/NotificationCenterScreen')} accessibilityLabel="Abrir actividad" style={{ padding: 6 }}>
+        <Ionicons name="notifications-outline" size={23} color={textColor} />
+      </TouchableOpacity>
+      <TouchableOpacity disabled={isHeaderHidden} onPress={() => router.push("/(screens)/Settings")} accessibilityLabel="Abrir ajustes" style={{ padding: 6 }}>
+        <Ionicons name="settings" size={25} color={textColor} />
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <ThemedView style={styles.container}>
@@ -1788,7 +1949,7 @@ export default function Inicio() {
           >
             <ThemedView style={styles.celebrationCard}>
               {confettiAnims.map((anim, index) => {
-                const left = (index % 5) * 18 + 8;
+                const left = (index % 5) * 70 + 8;
                 const top = index * 8 + 4;
                 return (
                   <Animated.View
@@ -1842,6 +2003,29 @@ export default function Inicio() {
         </Animated.View>
       )}
 
+      <Modal
+        visible={trialOfferModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.68)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <ThemedView style={{ width: '100%', maxWidth: 390, borderRadius: 22, padding: 22, borderWidth: 1, borderColor: `${primaryColor}55`, elevation: 10 }}>
+            <ThemedText style={{ fontSize: 26, textAlign: 'center', marginBottom: 8 }}>🎁</ThemedText>
+            <ThemedText style={{ fontSize: 20, fontWeight: '800', textAlign: 'center' }}>Tu prueba gratis está lista</ThemedText>
+            <ThemedText style={{ fontSize: 13, opacity: 0.78, textAlign: 'center', marginTop: 8, lineHeight: 19 }}>
+              Reclama tus 7 días de acceso premium desde la pantalla de suscripción.
+            </ThemedText>
+            <TouchableOpacity
+              onPress={handleOpenTrialOffer}
+              style={{ marginTop: 18, backgroundColor: primaryColor, borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+            >
+              <ThemedText style={{ color: '#fff', fontWeight: '800' }}>Ver oferta</ThemedText>
+            </TouchableOpacity>
+          </ThemedView>
+        </View>
+      </Modal>
+
       {/* 🔹 HEADER animado */}
       <Animated.View
         style={{
@@ -1850,37 +2034,21 @@ export default function Inicio() {
           alignSelf: "flex-start",
           zIndex: 10,
           justifyContent: "space-between",
-          flexDirection: "row",
+          flexDirection: isLongDisplayName ? 'column' : 'row',
+          alignItems: isLongDisplayName ? 'stretch' : 'center',
           width: "94%",
           opacity: headerOpacity,
           transform: [{ translateY: headerTranslateY }],
         }}
       >
-        <View style={{ padding: 5, flexDirection: 'row', alignItems: 'center' }}>
-          {subscriptionActive && (
-            <Ionicons name="diamond" size={20} color="#16a34a" style={{ marginRight: 8 }} />
-          )}
-          <ThemedText
-            style={{
-              fontSize: 30,
-              fontWeight: "800",
-              alignSelf: "flex-start",
-              color: subscriptionActive ? '#16a34a' : textColor,
-            }}
-          >
-            Hola {user ? user.displayName : "Usuario"}
-          </ThemedText>
-        </View>
-
-        <TouchableOpacity
-          disabled={isHeaderHidden}
-          onPress={() => router.push("/(screens)/Settings")}
-          style={{
-            bottom: 5,
-          }}
-        >
-          <Ionicons name="settings" size={27} color={textColor} />
-        </TouchableOpacity>
+        {isLongDisplayName ? (
+          <>
+            <View style={{ alignItems: 'flex-end' }}>{headerControls}</View>
+            {headerGreeting}
+          </>
+        ) : (
+          <>{headerGreeting}{headerControls}</>
+        )}
       </Animated.View>
 
       {/* 🔹 ScrollView animado */}
@@ -2074,24 +2242,14 @@ export default function Inicio() {
           )}
 
           <BalanceHeader />
+
           <TouchableOpacity
             onPress={handleOpenOrderCustomization}
-            style={{
-              alignSelf: 'flex-end',
-              marginRight: 10,
-              marginTop: 6,
-              marginBottom: 2,
-              backgroundColor: subscriptionActive ? `${primaryColor}18` : `${primaryColor}12`,
-              borderRadius: 999,
-              paddingHorizontal: 10,
-              paddingVertical: 6,
-              borderWidth: 1,
-              borderColor: subscriptionActive ? `${primaryColor}35` : `${primaryColor}25`,
-            }}
+            accessibilityLabel={subscriptionActive ? 'Personalizar orden de Inicio' : 'Personalizar orden de Inicio, requiere suscripción'}
+            accessibilityHint="Abre las opciones para reordenar las secciones"
+            style={{ alignSelf: 'flex-end', marginRight: 10, marginTop: 2, marginBottom: 6, padding: 7 }}
           >
-            <ThemedText style={{ fontSize: 12, fontWeight: '700', opacity: subscriptionActive ? 1 : 0.8 }}>
-              {subscriptionActive ? 'Personalizar orden' : 'Personalizar orden • Suscripción'}
-            </ThemedText>
+            <Ionicons name="options-outline" size={22} color={primaryColor} />
           </TouchableOpacity>
 
           {homeSectionsConfig.filter((item) => item.visible).map((item) => (
@@ -2175,11 +2333,82 @@ export default function Inicio() {
               </TouchableOpacity>
             </View>
 
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${borderColor}22`, borderRadius: 11, paddingHorizontal: 10, marginBottom: 10 }}>
+              <Ionicons name="search-outline" size={18} color={iconColor} />
+              <TextInput
+                value={grupoSearch}
+                onChangeText={setGrupoSearch}
+                placeholder="Buscar productos"
+                placeholderTextColor={iconColor}
+                style={{ flex: 1, color: textColor, paddingVertical: 9, paddingHorizontal: 8 }}
+              />
+              {grupoSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setGrupoSearch('')} style={{ padding: 4 }}>
+                  <Ionicons name="close-circle" size={18} color={iconColor} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7, paddingBottom: 10 }}>
+              {[
+                { key: 'mostBought', label: 'Más comprados' },
+                { key: 'newest', label: 'Más nuevos' },
+                { key: 'oldest', label: 'Más viejos' },
+                { key: 'leastBought', label: 'Menos comprados' },
+              ].map((option) => (
+                <TouchableOpacity
+                  key={option.key}
+                  onPress={() => setGrupoSort(option.key as typeof grupoSort)}
+                  style={{
+                    borderRadius: 10,
+                    paddingVertical: 10,
+                    paddingHorizontal: 10,
+                    flex: 1,
+                    backgroundColor: grupoSort === option.key ? primaryColor : `${borderColor}22`,
+                    borderWidth: 1,
+                    borderColor: grupoSort === option.key ? primaryColor : `${borderColor}55`,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <ThemedText style={{ color: grupoSort === option.key ? '#fff' : textColor, fontSize: 12, height: 20, textAlign: 'center' }}>
+                    {option.label}
+                  </ThemedText>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <ThemedText style={{ fontSize: 12, opacity: 0.75 }}>
+                {getVisibleGroupItems(grupoActivo || {}).filter((item) => grupoItems[item.actionId]?.selected).length} de {getVisibleGroupItems(grupoActivo || {}).length} seleccionados
+              </ThemedText>
+              <TouchableOpacity
+                onPress={() => {
+                  const visibleItems = getVisibleGroupItems(grupoActivo || {});
+                  const allSelected = visibleItems.length > 0 && visibleItems.every((item) => grupoItems[item.actionId]?.selected);
+                  setGrupoItems((previous) => ({
+                    ...previous,
+                    ...Object.fromEntries(visibleItems.map((item) => [item.actionId, { ...(previous[item.actionId] || { quantity: 1 }), selected: !allSelected }]))
+                  }));
+                }}
+                style={{ paddingVertical: 6, paddingHorizontal: 8 }}
+              >
+                <ThemedText style={{ color: primaryColor, fontSize: 12, fontWeight: '800' }}>
+                  {getVisibleGroupItems(grupoActivo || {}).length > 0 && getVisibleGroupItems(grupoActivo || {}).every((item) => grupoItems[item.actionId]?.selected) ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+
             <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
-              {getGroupItems(grupoActivo || {}).map((item) => {
+              {getVisibleGroupItems(grupoActivo || {}).map((item) => {
                 const choice = grupoItems[item.actionId] || { selected: true, quantity: 1 };
                 return (
-                  <View key={item.actionId} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${borderColor}55` }}>
+                  <TouchableOpacity
+                    key={item.actionId}
+                    activeOpacity={0.75}
+                    onPress={() => setGrupoItems((prev) => ({ ...prev, [item.actionId]: { ...choice, selected: !choice.selected } }))}
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: `${borderColor}55` }}
+                  >
                     <TouchableOpacity
                       onPress={() => setGrupoItems((prev) => ({ ...prev, [item.actionId]: { ...choice, selected: !choice.selected } }))}
                       style={{ width: 26, height: 26, borderRadius: 7, marginRight: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: choice.selected ? primaryColor : `${borderColor}55` }}
@@ -2188,7 +2417,7 @@ export default function Inicio() {
                     </TouchableOpacity>
                     <View style={{ flex: 1 }}>
                       <ThemedText style={{ fontWeight: '700' }}>{item.icono} {item.nombre}</ThemedText>
-                      <ThemedText style={{ fontSize: 11, opacity: 0.7 }}>${item.monto.toFixed(2)} · {item.categoria || 'Sin presupuesto'}</ThemedText>
+                      <ThemedText style={{ fontSize: 11, opacity: 0.7 }}>${item.monto.toFixed(2)} · {item.categoria || 'Sin presupuesto'} · {item.purchaseCount} compras</ThemedText>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <TouchableOpacity disabled={!choice.selected || choice.quantity <= 1} onPress={() => setGrupoItems((prev) => ({ ...prev, [item.actionId]: { ...choice, quantity: Math.max(1, choice.quantity - 1) } }))} style={{ padding: 7, opacity: choice.selected && choice.quantity > 1 ? 1 : 0.35 }}>
@@ -2199,7 +2428,7 @@ export default function Inicio() {
                         <Ionicons name="add-circle-outline" size={22} color={primaryColor} />
                       </TouchableOpacity>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
 
@@ -2256,12 +2485,12 @@ export default function Inicio() {
               </View>
             </ScrollView>
 
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 14 }}>
               <TouchableOpacity onPress={() => setGrupoActivo(null)} style={{ flex: 1, borderRadius: 11, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor }}>
                 <ThemedText>Cancelar</ThemedText>
               </TouchableOpacity>
               <TouchableOpacity disabled={grupoSaving} onPress={() => ejecutarGrupo(grupoActivo, grupoItems)} style={{ flex: 1, borderRadius: 11, paddingVertical: 12, alignItems: 'center', backgroundColor: primaryColor, opacity: grupoSaving ? 0.6 : 1 }}>
-                {grupoSaving ? <ActivityIndicator color="#fff" /> : <ThemedText style={{ color: '#fff', fontWeight: '800' }}>Registrar grupo</ThemedText>}
+                {grupoSaving ? <ActivityIndicator color="#fff" /> : <ThemedText style={{ color: '#fff' }}>Registrar</ThemedText>}
               </TouchableOpacity>
             </View>
           </View>

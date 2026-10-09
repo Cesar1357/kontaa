@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { Dimensions, TouchableOpacity, View } from 'react-native';
 
@@ -28,6 +29,38 @@ interface HistorialFavoriteChartCardProps {
   subtitle?: string;
   transactions: any[];
   onPress?: () => void;
+}
+
+export function AnalysisShortcutCard({
+  title = 'Análisis financiero',
+  subtitle = 'Resumen, presupuestos, hábitos y actividad',
+  onPress,
+}: {
+  title?: string;
+  subtitle?: string;
+  onPress?: () => void;
+}) {
+  const cardColor = useThemeColor({ light: '', dark: '' }, 'cardsMain');
+  const textColor = useThemeColor({ light: '', dark: '' }, 'text');
+  const iconColor = useThemeColor({ light: '', dark: '' }, 'icon');
+  const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: cardColor, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: `${primaryColor}40` }}
+    >
+      <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: `${primaryColor}20` }}>
+        <Ionicons name="analytics-outline" size={22} color={primaryColor} />
+      </View>
+      <View style={{ flex: 1, marginLeft: 10 }}>
+        <ThemedText style={{ color: textColor, fontSize: 13, fontWeight: '800' }}>{title}</ThemedText>
+        <ThemedText style={{ color: iconColor, fontSize: 11, marginTop: 3 }}>{subtitle}</ThemedText>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={iconColor} />
+    </TouchableOpacity>
+  );
 }
 
 const toDate = (tx: any): Date => {
@@ -109,7 +142,9 @@ export default function HistorialFavoriteChartCard({
       else amountRangeBuckets[4] += 1;
 
       if (!isIngreso) {
-        const category = tx?.presupuestoCategoria || tx?.preestablecidoMainNombre || tx?.descripcion || 'Otros';
+        const category = tx?.origen === 'transferencia-ahorro' || tx?.origen === 'retiro-ahorro'
+          ? 'Ahorro'
+          : tx?.presupuestoCategoria || tx?.preestablecidoMainNombre || tx?.descripcion || 'Otros';
         categories.set(category, (categories.get(category) || 0) + amount);
       }
     }

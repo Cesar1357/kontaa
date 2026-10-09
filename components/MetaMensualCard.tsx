@@ -173,6 +173,24 @@ export default function MetaMensualCard() {
   }, [isExpanded, user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid) return;
+
+    const key = `konta.metaCard.projectionMode.${user.uid}`;
+    AsyncStorage.getItem(key)
+      .then((value) => {
+        if (value === 'real' || value === 'conservative') setProjectionMode(value);
+      })
+      .catch(() => undefined);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const key = `konta.metaCard.projectionMode.${user.uid}`;
+    AsyncStorage.setItem(key, projectionMode).catch(() => undefined);
+  }, [projectionMode, user?.uid]);
+
+  useEffect(() => {
     const userId = (user as any)?.uid;
     if (!userId) {
       setGoals([]);
@@ -323,6 +341,23 @@ export default function MetaMensualCard() {
   }, [activeGoal, goals, monthlyNetIncome, projectionMode, velocityByGoal]);
 
   const canCycleGoals = goals.length > 1;
+  const goalSummary = activeGoal && values ? (
+    <>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <ThemedText style={{ fontSize: 13, fontWeight: '700', flexShrink: 1 }}>{activeGoal.nombre}</ThemedText>
+        <View style={{ backgroundColor: `${values.statusColor}1A`, borderRadius: 999, borderWidth: 1, borderColor: `${values.statusColor}55`, paddingHorizontal: 8, paddingVertical: 4 }}>
+          <ThemedText style={{ fontSize: 10, color: values.statusColor }}>{values.statusLabel}</ThemedText>
+        </View>
+      </View>
+      <View style={{ height: 8, borderRadius: 999, backgroundColor: `${primaryColor}18`, overflow: 'hidden', marginBottom: 8 }}>
+        <View style={{ width: `${Math.min(100, values.progress)}%`, height: '100%', borderRadius: 999, backgroundColor: values.onTrack ? '#22c55e' : '#f59e0b' }} />
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+        <ThemedText style={{ fontSize: 12, opacity: 0.82 }}>${activeGoal.cantidadActual.toFixed(0)} / ${activeGoal.meta.toFixed(0)}</ThemedText>
+        <ThemedText style={{ fontSize: 12, fontWeight: '700' }}>{values.progress.toFixed(0)}%</ThemedText>
+      </View>
+    </>
+  ) : null;
 
   return (
     <ThemedView
@@ -403,36 +438,7 @@ export default function MetaMensualCard() {
         <ThemedText style={{ fontSize: 12, opacity: 0.82 }}>No tienes metas activas con objetivo definido.</ThemedText>
       ) : !isExpanded ? (
         <>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <ThemedText style={{ fontSize: 13, fontWeight: '700', flexShrink: 1 }}>{activeGoal.nombre}</ThemedText>
-            <View style={{ backgroundColor: `${values.statusColor}1A`, borderRadius: 999, borderWidth: 1, borderColor: `${values.statusColor}55`, paddingHorizontal: 8, paddingVertical: 4 }}>
-              <ThemedText style={{ fontSize: 10, color: values.statusColor }}>{values.statusLabel}</ThemedText>
-            </View>
-          </View>
-
-          <View
-            style={{
-              height: 8,
-              borderRadius: 999,
-              backgroundColor: `${primaryColor}18`,
-              overflow: 'hidden',
-              marginBottom: 6,
-            }}
-          >
-            <View
-              style={{
-                width: `${Math.min(100, values.progress)}%`,
-                height: '100%',
-                borderRadius: 999,
-                backgroundColor: values.onTrack ? '#22c55e' : '#f59e0b',
-              }}
-            />
-          </View>
-
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <ThemedText style={{ fontSize: 12, opacity: 0.82 }}>${activeGoal.cantidadActual.toFixed(0)} / ${activeGoal.meta.toFixed(0)}</ThemedText>
-            <ThemedText style={{ fontSize: 12, fontWeight: '700' }}>{values.progress.toFixed(0)}%</ThemedText>
-          </View>
+          {goalSummary}
 
           <ThemedText style={{ fontSize: 12, opacity: 0.9, color: values.statusColor }}>{values.estimateText}</ThemedText>
           <ThemedText style={{ fontSize: 12, opacity: 0.78, marginBottom: 8 }}>
@@ -441,44 +447,7 @@ export default function MetaMensualCard() {
         </>
       ) : (
         <>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <ThemedText style={{ fontSize: 13, fontWeight: '700', flexShrink: 1 }}>{activeGoal.nombre}</ThemedText>
-            <View
-              style={{
-                backgroundColor: `${values.statusColor}1A`,
-                borderRadius: 999,
-                borderWidth: 1,
-                borderColor: `${values.statusColor}55`,
-                paddingHorizontal: 8,
-                paddingVertical: 4,
-              }}
-            >
-              <ThemedText style={{ fontSize: 10, color: values.statusColor }}>{values.statusLabel}</ThemedText>
-            </View>
-          </View>
-
-          <View
-            style={{
-              height: 8,
-              borderRadius: 999,
-              backgroundColor: `${primaryColor}18`,
-              overflow: 'hidden',
-              marginBottom: 10,
-            }}
-          >
-            <View
-              style={{
-                width: `${Math.min(100, values.progress)}%`,
-                height: '100%',
-                borderRadius: 999,
-                backgroundColor: values.onTrack ? '#22c55e' : '#f59e0b',
-              }}
-            />
-          </View>
-
-          <ThemedText style={{ fontSize: 12, opacity: 0.82, marginBottom: 8 }}>
-            ${activeGoal.cantidadActual.toFixed(0)} / ${activeGoal.meta.toFixed(0)} ({values.progress.toFixed(0)}%)
-          </ThemedText>
+          {goalSummary}
 
           <View
             style={{

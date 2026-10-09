@@ -21,6 +21,7 @@ const db = admin.firestore();
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const KONTA_ANDROID_PACKAGE = process.env.KONTA_ANDROID_PACKAGE || 'com.cesar1357.konta';
 const PLAY_RT_SUBSCRIPTION_TOPIC = process.env.PLAY_RT_SUBSCRIPTION_TOPIC || 'play-subscription-events';
+const notificationTokenOwners = new Map();
 
 const googleAuth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/androidpublisher'],
@@ -147,6 +148,7 @@ async function getEnabledPushTokens(userId) {
       const data = doc.data();
       if (data.pushToken) {
         tokens.push(data.pushToken);
+        notificationTokenOwners.set(data.pushToken, userId);
       }
     });
     
@@ -198,6 +200,94 @@ async function syncCompraMesesProgressFromRecurring({ userId, compraMesId, recur
  * Envía una notificación push a través de Expo
  * Ahora acepta un array de tokens para enviar a múltiples dispositivos
  */
+function hashNotificationPart(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function getNotificationDedupeKey(title, data = {}) {
+  const now = new Date();
+  const cooldownMs = getNotificationCooldownMs(data);
+  if (cooldownMs >= 7 * 24 * 60 * 60 * 1000) {
+    now.setDate(now.getDate() - now.getDay());
+  }
+  const dateKey = now.toISOString().slice(0, 10);
+  const threshold = Number(data.porcentaje || 0) >= 100 ? '100' : Number(data.porcentaje || 0) >= 80 ? '80' : 'event';
+  const scope = data.ahorroId || data.categoria || data.periodo || 'general';
+  return `${data.type || title}:${scope}:${threshold}:${dateKey}`;
+}
+
+function getNotificationCooldownMs(data = {}) {
+  if (data.type === 'ahorros' && data.ahorroId) return 7 * 24 * 60 * 60 * 1000;
+  return 24 * 60 * 60 * 1000;
+}
+
+async function reserveNotificationSlot(pushToken, title, data = {}) {
+  const dedupeKey = getNotificationDedupeKey(title, data);
+  const docId = `${hashNotificationPart(pushToken)}_${hashNotificationPart(dedupeKey)}`;
+  const stateRef = db.doc(`notificationDelivery/${docId}`);
+  const now = Date.now();
+  const cooldownMs = getNotificationCooldownMs(data);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(stateRef);
+    const state = snapshot.exists ? snapshot.data() || {} : {};
+    const lastAttemptAt = state.lastAttemptAt?.toDate?.()?.getTime?.() || 0;
+    const lastSentAt = state.lastSentAt?.toDate?.()?.getTime?.() || 0;
+
+    if (lastSentAt && now - lastSentAt < cooldownMs) return false;
+    if (state.status === 'sending' && lastAttemptAt && now - lastAttemptAt < 5 * 60 * 1000) return false;
+
+    transaction.set(stateRef, {
+      dedupeKey,
+      type: data.type || title,
+      status: 'sending',
+      lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return true;
+  });
+}
+
+async function finishNotificationSlot(pushToken, title, data, sent) {
+  const dedupeKey = getNotificationDedupeKey(title, data);
+  const docId = `${hashNotificationPart(pushToken)}_${hashNotificationPart(dedupeKey)}`;
+  await db.doc(`notificationDelivery/${docId}`).set({
+    status: sent ? 'sent' : 'failed',
+    ...(sent ? { lastSentAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+}
+
+async function recordNotificationEvent(pushToken, title, body, data = {}) {
+  let userId = notificationTokenOwners.get(pushToken);
+  if (!userId) {
+    const deviceSnapshot = await db.collectionGroup('devices')
+      .where('pushToken', '==', pushToken)
+      .limit(1)
+      .get();
+    userId = deviceSnapshot.empty ? null : deviceSnapshot.docs[0].ref.parent.parent?.id;
+  }
+  if (!userId) return;
+
+  const dedupeKey = getNotificationDedupeKey(title, data);
+  const eventId = hashNotificationPart(dedupeKey);
+  const safeData = JSON.parse(JSON.stringify(data, (_key, value) => value === undefined ? null : value));
+  await db.doc(`users/${userId}/notificationEvents/${eventId}`).set({
+    type: data.type || 'general',
+    title,
+    body,
+    data: safeData,
+    dedupeKey,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    read: false,
+  }, { merge: true });
+}
+
 async function sendPushNotification(pushTokens, title, body, data = {}) {
   if (!Array.isArray(pushTokens)) {
     pushTokens = [pushTokens]; // Para compatibilidad con llamadas individuales
@@ -206,6 +296,13 @@ async function sendPushNotification(pushTokens, title, body, data = {}) {
   const results = [];
   for (const pushToken of pushTokens) {
     try {
+      const reserved = await reserveNotificationSlot(pushToken, title, data);
+      if (!reserved) {
+        console.log('Notificación omitida por deduplicación:', { title, type: data.type, pushTokenHash: hashNotificationPart(pushToken) });
+        results.push(false);
+        continue;
+      }
+
       const message = {
         to: pushToken,
         sound: 'default',
@@ -229,13 +326,21 @@ async function sendPushNotification(pushTokens, title, body, data = {}) {
 
       if (jsonData.errors) {
         console.error('Error enviando notificación:', jsonData.errors);
+        await finishNotificationSlot(pushToken, title, data, false);
         results.push(false);
       } else {
         console.log('Notificación enviada exitosamente:', jsonData);
+        await finishNotificationSlot(pushToken, title, data, true);
+        await recordNotificationEvent(pushToken, title, body, data);
         results.push(true);
       }
     } catch (error) {
       console.error('Error en sendPushNotification:', error);
+      try {
+        await finishNotificationSlot(pushToken, title, data, false);
+      } catch (stateError) {
+        console.error('Error guardando estado de notificación:', stateError);
+      }
       results.push(false);
     }
   }
@@ -1001,12 +1106,12 @@ exports.notifyPresupuestosMensuales = functions.scheduler
 
 /**
  * Verifica presupuestos personalizados por categoría y envía alertas
- * Se ejecuta cada 6 horas para monitoreo frecuente
+ * Se ejecuta una vez al día; el registro de entrega evita duplicados por umbral y periodo.
  */
 exports.notifyPresupuestosPersonalizados = functions.scheduler
   .onSchedule(
     {
-      schedule: '0 */6 * * *', // Cada 6 horas
+      schedule: '0 19 * * *', // 7:00 PM diario
       timeZone: 'America/Mexico_City',
     },
     async (context) => {

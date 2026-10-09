@@ -101,9 +101,6 @@ export default function Forgot() {
       >
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Animated.View style={{ opacity: heroOpacity, transform: [{ translateY: heroTranslate }], width: '100%' }}>
-            <View style={[styles.badge, { backgroundColor: `${primaryColor}16`, borderColor: `${primaryColor}25` }]}>
-              <Text style={[styles.badgeText, { color: primaryColor }]}>Recuperación segura</Text>
-            </View>
             <Text style={[styles.brand, { color: textColor }]}>Konta</Text>
             <Text style={[styles.headline, { color: textColor }]}>Recupera tu acceso.</Text>
             <Text style={[styles.subtitle, { color: `${textColor}B0` }]}>Te enviaremos un enlace para restablecer tu contraseña y volver a entrar sin perder tu progreso.</Text>
@@ -171,7 +168,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   headline: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: '800',
     lineHeight: 34,
     marginBottom: 8,

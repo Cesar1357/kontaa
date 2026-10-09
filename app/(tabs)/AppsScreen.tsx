@@ -6,17 +6,17 @@ import { useFocusEffect } from 'expo-router/react-navigation';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
-  BackHandler,
-  FlatList,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
+    Alert,
+    BackHandler,
+    FlatList,
+    Modal,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
@@ -197,7 +197,14 @@ type LeakTransaction = {
   categoria?: string;
   descripcion?: string;
   preestablecidoMainNombre?: string;
+  origen?: string;
 };
+
+const getTransactionCategory = (transaction: any, fallback = 'General') => (
+  transaction?.origen === 'transferencia-ahorro' || transaction?.origen === 'retiro-ahorro'
+    ? 'Ahorro'
+    : transaction?.presupuestoCategoria || transaction?.categoria || fallback
+);
 
 type DebtItem = {
   id: string;
@@ -396,6 +403,7 @@ export default function AppsScreen() {
           categoria: data?.presupuestoCategoria || undefined,
           descripcion: data?.descripcion || undefined,
           preestablecidoMainNombre: data?.preestablecidoMainNombre || undefined,
+          origen: data?.origen || undefined,
         };
       });
 
@@ -540,7 +548,8 @@ export default function AppsScreen() {
           fecha: parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
           date: parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
           descripcion: data?.descripcion || 'Movimiento',
-          presupuestoCategoria: data?.presupuestoCategoria || 'Sin categoría',
+          presupuestoCategoria: getTransactionCategory(data, 'Sin categoría'),
+          origen: data?.origen || undefined,
         };
       });
       setCalendarTransactions(rows);
@@ -685,7 +694,7 @@ export default function AppsScreen() {
         type,
         amount: Math.max(Number(tx?.monto || 0), 0),
         date,
-        category: tx?.presupuestoCategoria || 'General',
+        category: getTransactionCategory(tx),
         source: 'transaccion',
       });
     }
@@ -787,7 +796,7 @@ export default function AppsScreen() {
         type: tx?.tipo === 'ingreso' ? 'ingreso' : 'egreso',
         amount: Math.max(Number(tx?.monto || 0), 0),
         date,
-        category: tx?.presupuestoCategoria || 'General',
+        category: getTransactionCategory(tx),
         source: 'transaccion',
       });
     }
@@ -890,7 +899,7 @@ export default function AppsScreen() {
       if (!tx.date || tx.date < since) continue;
       if (tx.monto <= 0 || tx.monto > maxAmount) continue;
 
-      const label = (tx.categoria || tx.preestablecidoMainNombre || tx.descripcion || 'Otros').trim() || 'Otros';
+      const label = getTransactionCategory(tx, tx.preestablecidoMainNombre || tx.descripcion || 'Otros').trim() || 'Otros';
       const key = label.toLowerCase();
       const current = grouped.get(key) || { label, count: 0, total: 0 };
 
@@ -2210,20 +2219,22 @@ export default function AppsScreen() {
             <ThemedText style={[styles.subtitle, { color: `${textColor}A3` }]}>Mini herramientas para decisiones financieras rapidas.</ThemedText>
             <Pressable
               onPress={handleOpenToolCustomization}
+              accessibilityLabel={subscriptionActive ? 'Personalizar orden de aplicaciones' : 'Personalizar orden de aplicaciones, requiere suscripción'}
+              accessibilityHint="Abre las opciones para reordenar las aplicaciones"
               style={{
-                alignSelf: 'flex-start',
+                alignSelf: 'flex-end',
+                width: 36,
+                height: 36,
+                alignItems: 'center',
+                justifyContent: 'center',
                 marginBottom: 10,
                 backgroundColor: subscriptionActive ? `${primaryColor}18` : `${primaryColor}10`,
-                borderRadius: 999,
-                paddingHorizontal: 10,
-                paddingVertical: 6,
+                borderRadius: 10,
                 borderWidth: 1,
                 borderColor: subscriptionActive ? `${primaryColor}40` : `${primaryColor}25`,
               }}
             >
-              <Text style={{ fontSize: 12, fontWeight: '700', color: primaryColor, opacity: subscriptionActive ? 1 : 0.8 }}>
-                Personalizar orden de apps
-              </Text>
+              <Ionicons name="options-outline" size={19} color={primaryColor} />
             </Pressable>
         </View>
         <View style={styles.gridWrap}>

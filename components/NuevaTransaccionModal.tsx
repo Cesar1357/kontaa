@@ -51,6 +51,11 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
   const [sugerenciaSeleccionada, setSugerenciaSeleccionada] = useState<string | null>(null);
 
   const backModalColor = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
+  const textColor = useThemeColor({ light: '', dark: '' }, 'text');
+  const cardsMain = useThemeColor({ light: '', dark: '' }, 'cardsMain');
+  const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
+  const primaryDarkColor = useThemeColor({ light: '', dark: '' }, 'primaryDark');
+  const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
 
   const descripcionRef = useRef<TextInput>(null);
   const montoRef = useRef<TextInput>(null);
@@ -65,6 +70,39 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
     'Transporte',
     'Internet',
   ];
+
+  const styles = StyleSheet.create({
+  input: {
+    backgroundColor: textColor === "#0F172A" ? "#e2e8f0" : cardsMain,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 12,
+    color: textColor,
+    borderWidth: 1,
+    borderColor: `${borderColor}aa`,
+    fontSize: 14,
+  },
+  tipoBtn: {
+    flex: 1,
+    marginHorizontal: 5,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderWidth: 1, 
+    borderColor: `${borderColor}aa`
+  },
+  presupuestoBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginRight: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1, 
+    borderColor: `${borderColor}aa`
+  },
+});
 
   const normalizeText = (value: string) =>
     value
@@ -315,10 +353,10 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
                         }}
                         style={[
                           styles.presupuestoBtn,
-                          { backgroundColor: '#2a2a2a', borderWidth: 1, borderColor: '#3b3b3b' },
+                          { backgroundColor: textColor === "#0F172A" ? "#e2e8f0" : cardsMain, borderWidth: 1, borderColor: `${borderColor}aa` },
                         ]}
                       >
-                        <Text style={{ color: 'white' }}>{item}</Text>
+                        <Text style={{ color: textColor }}>{item}</Text>
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
@@ -343,7 +381,7 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
                   onPress={() => setTipo("ingreso")}
                   style={[
                     styles.tipoBtn,
-                    { backgroundColor: tipo === "ingreso" ? "#3edc81" : "#2a2a2a" },
+                    { backgroundColor: tipo === "ingreso" ? "#3edc81" : textColor === "#0F172A" ? "#e2e8f0" : cardsMain },
                   ]}
                 >
                   <Text style={{ color: tipo === "ingreso" ? "black" : "white", fontWeight: "600" }}>
@@ -355,7 +393,7 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
                   onPress={() => setTipo("egreso")}
                   style={[
                     styles.tipoBtn,
-                    { backgroundColor: tipo === "egreso" ? "#ff6363" : "#2a2a2a" },
+                    { backgroundColor: tipo === "egreso" ? "#ff6363" : textColor === "#0F172A" ? "#e2e8f0" : cardsMain },
                   ]}
                 >
                   <Text style={{ color: tipo === "egreso" ? "black" : "white", fontWeight: "600" }}>
@@ -375,10 +413,10 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
                       onPress={() => setPresupuestoSeleccionado(null)}
                       style={[
                         styles.presupuestoBtn,
-                        { backgroundColor: !presupuestoSeleccionado ? "#6366f1" : "#2a2a2a" },
+                        { backgroundColor: !presupuestoSeleccionado ? "#6366f1" : textColor === "#0F172A" ? "#e2e8f0" : cardsMain },
                       ]}
                     >
-                      <Text style={{ color: "white" }}>Ninguno</Text>
+                      <Text style={{ color: textColor }}>Ninguno</Text>
                     </TouchableOpacity>
 
                     {presupuestos.map((p) => (
@@ -393,11 +431,11 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
                           styles.presupuestoBtn,
                           {
                             backgroundColor:
-                              presupuestoSeleccionado === p.id ? "#6366f1" : "#2a2a2a",
+                              presupuestoSeleccionado === p.id ? "#6366f1" : textColor === "#0F172A" ? "#e2e8f0" : cardsMain,
                           },
                         ]}
                       >
-                        <Text style={{ color: "white" }}>{p.categoria}</Text>
+                        <Text style={{ color: textColor }}>{p.categoria}</Text>
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
@@ -414,10 +452,10 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
                       onPress={() => setPreestablecidoMainSeleccionado(null)}
                       style={[
                         styles.presupuestoBtn,
-                        { backgroundColor: !preestablecidoMainSeleccionado ? "#6366f1" : "#2a2a2a" },
+                        { backgroundColor: !preestablecidoMainSeleccionado ? "#6366f1" : textColor === "#0F172A" ? "#e2e8f0" : cardsMain },
                       ]}
                     >
-                      <Text style={{ color: "white" }}>Ninguno</Text>
+                      <Text style={{ color: textColor }}>Ninguno</Text>
                     </TouchableOpacity>
 
                     {preestablecidosMain.map((main) => (
@@ -427,11 +465,11 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
                         style={[
                           styles.presupuestoBtn,
                           {
-                            backgroundColor: preestablecidoMainSeleccionado === main.id ? "#6366f1" : "#2a2a2a",
+                            backgroundColor: preestablecidoMainSeleccionado === main.id ? "#6366f1" : textColor === "#0F172A" ? "#e2e8f0" : cardsMain,
                           },
                         ]}
                       >
-                        <Text numberOfLines={1} style={{ color: "white", maxWidth: 120 }}>
+                        <Text numberOfLines={1} style={{ color: textColor, maxWidth: 120 }}>
                           {(main.icono || "📁") + " " + (main.nombre || "Sin nombre")}
                         </Text>
                       </TouchableOpacity>
@@ -483,29 +521,3 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  input: {
-    backgroundColor: "#2a2a2a",
-    color: "white",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 10,
-  },
-  tipoBtn: {
-    flex: 1,
-    marginHorizontal: 5,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  presupuestoBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    marginRight: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-});

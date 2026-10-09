@@ -1,11 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useFocusEffect } from 'expo-router/react-navigation';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, BackHandler, Dimensions, FlatList, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Switch, ToastAndroid, TouchableOpacity, View } from "react-native";
-import Animated, { FadeInDown, FadeOutUp, Layout, useSharedValue, withTiming } from "react-native-reanimated";
+import { router } from 'expo-router';
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, KeyboardAvoidingView, Platform, TextInput, ToastAndroid, TouchableOpacity, View } from "react-native";
+import Animated, { FadeInDown, FadeOutUp, Layout } from "react-native-reanimated";
 import { RFValue } from 'react-native-responsive-fontsize';
 import { db } from '../../config/firebase';
   
@@ -13,155 +10,39 @@ import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { useTransactions } from '@/hooks/useTransactions';
-import { buildCryptoValueSeries, buildSavingsTotalSeries } from '@/services/historialService';
 import { endOfDay, format, startOfDay } from "date-fns";
 import { LinearGradient } from "expo-linear-gradient";
 import { collection, deleteDoc, doc, onSnapshot } from "firebase/firestore";
-import { LineChart as LineChartKit } from 'react-native-chart-kit';
 import { ScrollView } from 'react-native-gesture-handler';
-import { BarChart, LineChart, PieChart } from "react-native-gifted-charts";
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Chip } from 'react-native-paper';
 
-const screenWidth = Dimensions.get('window').width;
-const screenHeight = Dimensions.get('window').height;
-const chartCardWidth = screenWidth - 24;
-const chartCardHeight = Math.max(250, Math.min(420, screenHeight * 0.56));
-const chartCardGap = 0;
-
-function CryptoHistoryChart({
-  transactions,
-  chartType,
-  chartWidth,
-  lineColor,
-  borderColor,
-}: {
-  transactions: any[];
-  chartType: 'crypto' | 'savings';
-  chartWidth: number;
-  lineColor: string;
-  borderColor: string;
-}) {
-  const rawSeries = chartType === 'crypto'
-    ? buildCryptoValueSeries(transactions)
-    : buildSavingsTotalSeries(transactions);
-  const series = rawSeries.filter((item) => Number.isFinite(item.value) && item.date instanceof Date && !Number.isNaN(item.date.getTime()));
-
-  if (series.length === 0) {
-    return <ThemedText style={{ color: '#aaa', marginTop: 16 }}>Sin datos para este periodo</ThemedText>;
-  }
-
-  if (series.length === 1) {
-    return <ThemedText style={{ color: lineColor, marginTop: 16 }}>Un movimiento registrado: {series[0].value.toFixed(chartType === 'crypto' ? 6 : 2)}</ThemedText>;
-  }
-
-  const chartSeries = series.length <= 40
-    ? series
-    : Array.from({ length: 40 }, (_, index) => series[Math.round(index * (series.length - 1) / 39)]);
-
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled style={{ marginTop: 8 }}>
-      <LineChart
-        data={chartSeries.map((item, index) => ({
-          value: item.value,
-          label: index % 2 === 0 ? format(item.date, 'dd/MM') : '',
-        }))}
-        color={lineColor}
-        thickness={2}
-        areaChart
-        curved
-        startFillColor={lineColor}
-        endFillColor={`${lineColor}00`}
-        yAxisThickness={0}
-        xAxisColor={borderColor}
-        yAxisColor={borderColor}
-        xAxisLabelTextStyle={{ color: lineColor, fontSize: 10 }}
-        noOfSections={4}
-        width={Math.max(chartWidth, chartSeries.length * 48)}
-      />
-    </ScrollView>
-  );
-}
-
-type HistorialChartKey =
-  | 'overview'
-  | 'bars'
-  | 'weekdayActivity'
-  | 'amountRanges'
-  | 'pieType'
-  | 'pieCategory'
-  | 'cumulative'
-  | 'trend'
-  | 'cryptoQuantity'
-  | 'savingsTotal';
-
-interface HistorialChartConfig {
-  key: HistorialChartKey;
-  visible: boolean;
-}
-
-const HISTORIAL_CHART_CONFIG_DEFAULT: HistorialChartConfig[] = [
-  { key: 'overview', visible: true },
-  { key: 'bars', visible: true },
-  { key: 'weekdayActivity', visible: true },
-  { key: 'amountRanges', visible: true },
-  { key: 'pieType', visible: true },
-  { key: 'pieCategory', visible: true },
-  { key: 'cumulative', visible: true },
-  { key: 'trend', visible: true },
-  { key: 'cryptoQuantity', visible: true },
-  { key: 'savingsTotal', visible: true },
-];
-
-const HISTORIAL_CHART_META: Record<HistorialChartKey, { title: string; subtitle: string }> = {
-  overview: { title: 'Vista general', subtitle: 'Tendencia completa de todos los datos' },
-  bars: { title: 'Actividad y flujo', subtitle: 'Cantidad de movimientos y flujo mensual' },
-  weekdayActivity: { title: 'Patrón semanal', subtitle: 'Qué días concentran más movimientos' },
-  amountRanges: { title: 'Rangos de monto', subtitle: 'Distribución por tamaños de transacción' },
-  pieType: { title: 'Distribución general', subtitle: 'Relación entre ingresos y egresos' },
-  pieCategory: { title: 'Gastos por categoría', subtitle: 'Top categorías del periodo visible' },
-  cumulative: { title: 'Saldo acumulado', subtitle: 'Evolución del saldo neto en el periodo' },
-  trend: { title: 'Tendencia de movimientos', subtitle: 'Picos positivos y negativos por transacción' },
-  cryptoQuantity: { title: 'Cripto: valor en el tiempo', subtitle: 'Valor acumulado de tus movimientos cripto en MXN' },
-  savingsTotal: { title: 'Ahorros: saldo acumulado', subtitle: 'Evolución del total en tus metas/ahorros' },
+const toSafeDate = (value: any): Date => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (value?.toDate) return value.toDate();
+  const converted = value ? new Date(value) : new Date(0);
+  return Number.isNaN(converted.getTime()) ? new Date(0) : converted;
 };
 
 export default function HistorialScreen() {
-  const { openCharts, focusChartKey } = useLocalSearchParams<{ openCharts?: string; focusChartKey?: string }>();
   const { user } = useAuth();
   const userId = (user as any)?.uid as string | undefined;
   const transaccionesBase = useTransactions(userId);
   const [transacciones, setTransacciones] = useState<any[]>([]);
-  const [historialAhorros, setHistorialAhorros] = useState<any[]>([]);
-  const [historialCripto, setHistorialCripto] = useState<any[]>([]);
   const [accionesCatalogo, setAccionesCatalogo] = useState<Record<string, any>>({});
-  const [isExpanded, setIsExpanded] = useState(false);
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
   const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background2');
   const graficaFondoColor = useThemeColor({ light: '', dark: '' }, 'graficaHistorial');
-  const cardsMain = useThemeColor({ light: '', dark: '' }, 'cardsMain');
   const progressBg = useThemeColor({ light: '', dark: '' }, 'progressBg');
-  const tintColor = useThemeColor({ light: '', dark: '' }, 'tint');
   const iconColor = useThemeColor({ light: '', dark: '' }, 'icon');
   const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
-  const primaryDarkColor = useThemeColor({ light: '', dark: '' }, 'primaryDark');
-  const headerColors: [string, string] = [primaryColor, primaryDarkColor || primaryColor];
-  const axisLabelTextStyle = { color: textColor, fontSize: 10 };
-  const extraChartRightSpace = 120;
-
-  const getBarChartLayout = (dataLength: number, barWidth: number, minWidth: number, minGap: number = 18) => {
-    const safeLength = Math.max(1, dataLength);
-    const width = Math.max(minWidth, safeLength * (barWidth + minGap));
-    const spacing = Math.max(minGap, (width - safeLength * barWidth) / Math.max(1, safeLength - 1));
-    return { width, spacing };
-  };
+  const headerColors: [string, string] = [primaryColor, primaryColor];
 
   const [filtered, setFiltered] = useState<any[]>([]);
-  const [filteredChart, setFilteredChart] = useState<any[]>([]);
+  const [transactionSearchOpen, setTransactionSearchOpen] = useState(false);
+  const [transactionSearch, setTransactionSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [chartDataLimit, setChartDataLimit] = useState<number>(30);
-  const [activeChartIndex, setActiveChartIndex] = useState(0);
 
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [dateStep, setDateStep] = useState<'start' | 'end' | 'month'>('start');
@@ -175,17 +56,7 @@ export default function HistorialScreen() {
   const [selectedMonth, setSelectedMonth] = useState<Date | null>(null);
   const [amountFilter, setAmountFilter] = useState<'all' | '0-99' | '100-499' | '500-999' | '1000-4999' | '5000+' >('all');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [chartSelectionMode, setChartSelectionMode] = useState<'recent' | 'distributed' | 'balancedWeek' | 'balancedMonth'>('distributed');
-  const [showChartControls, setShowChartControls] = useState(false);
-  const [subscriptionActive, setSubscriptionActive] = useState<boolean>(false);
-  const [showChartOrderModal, setShowChartOrderModal] = useState(false);
-  const [chartCardsConfig, setChartCardsConfig] = useState<HistorialChartConfig[]>(HISTORIAL_CHART_CONFIG_DEFAULT);
-  const [favoriteCharts, setFavoriteCharts] = useState<Array<{ key: HistorialChartKey; title: string; subtitle: string }>>([]);
-  const chartsBottomSheetRef = useRef<BottomSheetModal>(null);
-  const chartsBottomSheetSnapPoints = useMemo(() => ['100%'], []);
-
-  const height = useSharedValue(0);
-  const opacity = useSharedValue(0);
+  const [subscriptionActive, setSubscriptionActive] = useState(false);
 
   const rangeOptions = [
     { key: 'Total', label: 'Todos' },
@@ -203,21 +74,10 @@ export default function HistorialScreen() {
     { key: '5000+', label: '5000+' },
   ] as const;
 
-  const visibleChartCards = useMemo(
-    () => chartCardsConfig.filter((item) => item.visible).map((item) => ({ key: item.key, ...HISTORIAL_CHART_META[item.key] })),
-    [chartCardsConfig]
-  );
-
-  const renderChartsBackdrop = useCallback(
-    (props: any) => (
-      <BottomSheetBackdrop
-        {...props}
-        appearsOnIndex={0}
-        disappearsOnIndex={-1}
-        pressBehavior="close"
-      />
-    ),
-    []
+  const getTransactionCategory = (transaction: any) => (
+    transaction?.origen === 'transferencia-ahorro' || transaction?.origen === 'retiro-ahorro'
+      ? 'Ahorro'
+      : transaction?.presupuestoCategoria || transaction?.categoria || transaction?.categoriaNombre || ''
   );
 
   useEffect(() => {
@@ -235,32 +95,18 @@ export default function HistorialScreen() {
     return () => unsubscribe();
   }, [userId]);
     
-  const toggleExpanded = () => {
-    const next = !isExpanded;
-    setIsExpanded(next);
-    height.value = withTiming(next ? 415 : 0, { duration: 400 });
-    opacity.value = withTiming(next ? 1 : 0, { duration: 300 });
-  };
-
   useEffect(() => {
     if (!userId) return;
     const cryptoMovements = new Map<string, any[]>();
-    const savingsMovements = new Map<string, any[]>();
     const movementUnsubscribers: Record<string, () => void> = {};
-    const savingsUnsubscribers: Record<string, () => void> = {};
 
     const updateTransactions = () => {
-      const savings = Array.from(savingsMovements.values()).flat();
       const crypto = Array.from(cryptoMovements.values()).flat();
       const merged = [
         ...transaccionesBase,
         ...crypto.filter((movement) => movement.ledger !== 'local' && !movement.originTransactionId),
       ].sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0));
       setTransacciones(merged);
-      setHistorialAhorros(savings
-        .sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0)));
-      setHistorialCripto(crypto
-        .sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0)));
     };
 
     const cryptosRef = collection(db, `users/${userId}/criptos`);
@@ -309,48 +155,9 @@ export default function HistorialScreen() {
       });
     });
 
-    const savingsRef = collection(db, `users/${userId}/ahorros`);
-    const unsubSavings = onSnapshot(savingsRef, (snap) => {
-      const currentIds = new Set(snap.docs.map((d) => d.id));
-
-      Object.keys(savingsUnsubscribers).forEach((savingId) => {
-        if (!currentIds.has(savingId)) {
-          savingsUnsubscribers[savingId]?.();
-          delete savingsUnsubscribers[savingId];
-          savingsMovements.delete(savingId);
-        }
-      });
-
-      snap.docs.forEach((savingDoc) => {
-        if (savingsUnsubscribers[savingDoc.id]) return;
-
-        const movementsRef = collection(db, `users/${userId}/ahorros/${savingDoc.id}/movimientos`);
-        savingsUnsubscribers[savingDoc.id] = onSnapshot(movementsRef, (movementSnap) => {
-          savingsMovements.set(savingDoc.id, movementSnap.docs.map((movementDoc) => {
-            const movement = movementDoc.data() as any;
-            const date = movement.creado?.toDate?.() || movement.fecha?.toDate?.() || new Date();
-
-            return {
-              id: `saving-${savingDoc.id}-${movementDoc.id}`,
-              tipo: movement.tipo === 'retiro' || movement.tipo === 'pasarATransacciones' ? 'egreso' : 'ingreso',
-              monto: Number(movement.monto || 0),
-              descripcion: movement.nota || movement.tipo || 'Movimiento de ahorro',
-              fecha: movement.creado || movement.fecha,
-              date,
-              movimientoTipo: movement.tipo,
-              origen: 'movimiento-ahorro',
-            };
-          }));
-          updateTransactions();
-        });
-      });
-    });
-
     return () => {
       unsubCryptos();
-      unsubSavings();
       Object.values(movementUnsubscribers).forEach((unsubscribe) => unsubscribe());
-      Object.values(savingsUnsubscribers).forEach((unsubscribe) => unsubscribe());
     };
   }, [userId, transaccionesBase]);
 
@@ -361,119 +168,12 @@ export default function HistorialScreen() {
     }
 
     const userRef = doc(db, `users/${userId}`);
-    const unsub = onSnapshot(userRef, (snap) => {
-      const data = snap.data() || {};
-      setSubscriptionActive(Boolean((data as any).supportSubscription?.active));
+    const unsubscribe = onSnapshot(userRef, (snapshot) => {
+      setSubscriptionActive(Boolean((snapshot.data() as any)?.supportSubscription?.active));
     });
 
-    return () => unsub();
+    return () => unsubscribe();
   }, [userId]);
-
-  useEffect(() => {
-    if (!userId) return;
-
-    const loadChartConfig = async () => {
-      try {
-        const key = `konta.historial.chartCardsConfig.${userId}`;
-        const raw = await AsyncStorage.getItem(key);
-        if (!raw) return;
-
-        const parsed = JSON.parse(raw) as HistorialChartConfig[];
-        const filtered = parsed.filter((item) => HISTORIAL_CHART_CONFIG_DEFAULT.some((base) => base.key === item.key));
-        const missing = HISTORIAL_CHART_CONFIG_DEFAULT.filter((base) => !filtered.some((item) => item.key === base.key));
-        setChartCardsConfig([...filtered, ...missing]);
-      } catch (error) {
-        console.log('No se pudo cargar la configuracion de graficas:', error);
-      }
-    };
-
-    loadChartConfig();
-  }, [userId]);
-
-  useEffect(() => {
-    if (!userId) return;
-
-    const persistChartConfig = async () => {
-      try {
-        const key = `konta.historial.chartCardsConfig.${userId}`;
-        await AsyncStorage.setItem(key, JSON.stringify(chartCardsConfig));
-      } catch (error) {
-        console.log('No se pudo guardar la configuracion de graficas:', error);
-      }
-    };
-
-    persistChartConfig();
-  }, [chartCardsConfig, userId]);
-
-  useEffect(() => {
-    if (!userId) {
-      setFavoriteCharts([]);
-      return;
-    }
-
-    const loadFavoriteCharts = async () => {
-      try {
-        const key = `konta.historial.favoriteCharts.${userId}`;
-        const raw = await AsyncStorage.getItem(key);
-        if (!raw) {
-          setFavoriteCharts([]);
-          return;
-        }
-        const parsed = JSON.parse(raw) as Array<{ key: HistorialChartKey; title: string; subtitle: string }>;
-        const valid = Array.isArray(parsed)
-          ? parsed.filter((item) => HISTORIAL_CHART_CONFIG_DEFAULT.some((base) => base.key === item.key))
-          : [];
-        setFavoriteCharts(valid);
-      } catch (error) {
-        console.log('No se pudo cargar graficas favoritas:', error);
-      }
-    };
-
-    loadFavoriteCharts();
-  }, [userId]);
-
-  useEffect(() => {
-    if (activeChartIndex <= Math.max(0, visibleChartCards.length - 1)) return;
-    setActiveChartIndex(Math.max(0, visibleChartCards.length - 1));
-  }, [activeChartIndex, visibleChartCards.length]);
-
-  useEffect(() => {
-    if (openCharts !== '1') return;
-    setIsExpanded(true);
-
-    if (!focusChartKey) return;
-    const idx = visibleChartCards.findIndex((item) => item.key === focusChartKey);
-    if (idx >= 0) setActiveChartIndex(idx);
-  }, [openCharts, focusChartKey, visibleChartCards]);
-
-  useEffect(() => {
-    if (isExpanded) {
-      chartsBottomSheetRef.current?.present();
-      return;
-    }
-
-    chartsBottomSheetRef.current?.dismiss();
-  }, [isExpanded]);
-
-  useEffect(() => {
-    const backAction = () => {
-      if (!isExpanded) return false;
-      setIsExpanded(false);
-      return true;
-    };
-
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
-    return () => backHandler.remove();
-  }, [isExpanded]);
-
-  useFocusEffect(
-    useCallback(() => {
-      return () => {
-        chartsBottomSheetRef.current?.dismiss();
-        setIsExpanded(false);
-      };
-    }, [])
-  );
 
   const total = transacciones.reduce(
     (acc, t) => acc + (t.tipo === "ingreso" ? t.monto : -t.monto),
@@ -492,208 +192,6 @@ export default function HistorialScreen() {
 
   const neto = ingresos - egresos;
 
-  // Determinar cuántos datos mostrar en la gráfica
-  const chartDisplayCount = filteredChart.length < 5 ? filteredChart.length : Math.min(chartDataLimit, filteredChart.length);
-  const chartDataToDisplay = useMemo(() => {
-    if (chartDisplayCount <= 0) return [];
-    if (filteredChart.length <= chartDisplayCount) return filteredChart;
-
-    if (chartSelectionMode === 'recent') {
-      return filteredChart.slice(Math.max(0, filteredChart.length - chartDisplayCount), filteredChart.length);
-    }
-
-    if (chartSelectionMode === 'balancedWeek' || chartSelectionMode === 'balancedMonth') {
-      const buckets = new Map<string, any[]>();
-
-      for (const tx of filteredChart) {
-        const d = tx.date || new Date();
-        let key = '';
-
-        if (chartSelectionMode === 'balancedWeek') {
-          const weekday = d.getDay();
-          const mondayOffset = (weekday + 6) % 7;
-          const weekStart = new Date(d);
-          weekStart.setDate(d.getDate() - mondayOffset);
-          key = `${weekStart.getFullYear()}-${weekStart.getMonth() + 1}-${weekStart.getDate()}`;
-        } else {
-          key = `${d.getFullYear()}-${d.getMonth() + 1}`;
-        }
-
-        if (!buckets.has(key)) buckets.set(key, []);
-        buckets.get(key)?.push(tx);
-      }
-
-      const representatives = Array.from(buckets.values())
-        .map((bucket) => {
-          if (bucket.length === 1) return bucket[0];
-
-          const signedAvg = bucket.reduce((acc, tx) => {
-            const amount = Number(tx.monto || 0);
-            return acc + (tx.tipo === 'ingreso' ? amount : -amount);
-          }, 0) / bucket.length;
-
-          return bucket.reduce((closest, tx) => {
-            const amount = Number(tx.monto || 0);
-            const signed = tx.tipo === 'ingreso' ? amount : -amount;
-            const closestAmount = Number(closest.monto || 0);
-            const closestSigned = closest.tipo === 'ingreso' ? closestAmount : -closestAmount;
-            return Math.abs(signed - signedAvg) < Math.abs(closestSigned - signedAvg) ? tx : closest;
-          }, bucket[0]);
-        })
-        .sort((a, b) => {
-          const aDate = a.date ? new Date(a.date).getTime() : 0;
-          const bDate = b.date ? new Date(b.date).getTime() : 0;
-          return aDate - bDate;
-        });
-
-      if (representatives.length <= chartDisplayCount) return representatives;
-
-      const sampled: any[] = [];
-      const maxIndex = representatives.length - 1;
-      const step = maxIndex / Math.max(1, chartDisplayCount - 1);
-      for (let i = 0; i < chartDisplayCount; i++) {
-        sampled.push(representatives[Math.min(maxIndex, Math.round(i * step))]);
-      }
-      return sampled;
-    }
-
-    // Modo distribuido: toma puntos espaciados a lo largo del rango filtrado.
-    const sampled: any[] = [];
-    const maxIndex = filteredChart.length - 1;
-    const step = maxIndex / Math.max(1, chartDisplayCount - 1);
-
-    for (let i = 0; i < chartDisplayCount; i++) {
-      const idx = Math.min(maxIndex, Math.round(i * step));
-      sampled.push(filteredChart[idx]);
-    }
-
-    return sampled;
-  }, [filteredChart, chartDisplayCount, chartSelectionMode]);
-
-  const chartData = chartDataToDisplay.map((t) => ({
-    value: t.tipo === "ingreso" ? t.monto : -t.monto,
-    label: format(t.date || new Date(), "dd/MM"),
-  }));
-
-  const chartSummary = useMemo(() => {
-    const dailyMap = new Map<string, { ingresos: number; egresos: number; neto: number; movimientos: number }>();
-    const monthlyMap = new Map<string, { ingresos: number; egresos: number; neto: number }>();
-    const categories = new Map<string, number>();
-    const weekdayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
-    const weekdayMovements = [0, 0, 0, 0, 0, 0, 0];
-    const amountRangeLabels = ['0-99', '100-499', '500-999', '1000-4999', '5000+'];
-    const amountRangeBuckets = [0, 0, 0, 0, 0];
-    let selectedIngresos = 0;
-    let selectedEgresos = 0;
-
-    for (const tx of chartDataToDisplay) {
-      const d = tx.date || new Date();
-      const dayKey = format(d, 'dd/MM');
-      const monthKey = format(d, 'MM/yy');
-      const amount = Number(tx.monto || 0);
-      const isIngreso = tx.tipo === 'ingreso';
-      const signedAmount = isIngreso ? amount : -amount;
-
-      if (isIngreso) {
-        selectedIngresos += amount;
-      } else {
-        selectedEgresos += amount;
-      }
-
-      weekdayMovements[d.getDay()] += 1;
-
-      if (amount < 100) amountRangeBuckets[0] += 1;
-      else if (amount < 500) amountRangeBuckets[1] += 1;
-      else if (amount < 1000) amountRangeBuckets[2] += 1;
-      else if (amount < 5000) amountRangeBuckets[3] += 1;
-      else amountRangeBuckets[4] += 1;
-
-      const dayBase = dailyMap.get(dayKey) || { ingresos: 0, egresos: 0, neto: 0, movimientos: 0 };
-      dayBase.ingresos += isIngreso ? amount : 0;
-      dayBase.egresos += !isIngreso ? amount : 0;
-      dayBase.neto += signedAmount;
-      dayBase.movimientos += 1;
-      dailyMap.set(dayKey, dayBase);
-
-      const monthBase = monthlyMap.get(monthKey) || { ingresos: 0, egresos: 0, neto: 0 };
-      monthBase.ingresos += isIngreso ? amount : 0;
-      monthBase.egresos += !isIngreso ? amount : 0;
-      monthBase.neto += signedAmount;
-      monthlyMap.set(monthKey, monthBase);
-
-      if (!isIngreso) {
-        const category = tx.presupuestoCategoria || tx.preestablecidoMainNombre || tx.descripcion || 'Otros';
-        categories.set(category, (categories.get(category) || 0) + amount);
-      }
-    }
-
-    let running = 0;
-    const cumulativeLineData = chartDataToDisplay.map((tx, index) => {
-      const amount = Number(tx.monto || 0);
-      running += tx.tipo === 'ingreso' ? amount : -amount;
-      return {
-        value: Number(running.toFixed(2)),
-        label: index % 2 === 0 ? format(tx.date || new Date(), 'dd/MM') : '',
-      };
-    });
-
-    const trendLineData = chartDataToDisplay.map((tx, index) => ({
-      value: Number((tx.tipo === 'ingreso' ? tx.monto : -tx.monto).toFixed(2)),
-      label: index % 2 === 0 ? format(tx.date || new Date(), 'dd/MM') : '',
-    }));
-
-    const movementBars = Array.from(dailyMap.entries()).slice(-10).map(([label, d]) => ({
-      value: d.movimientos,
-      label,
-      frontColor: tintColor,
-    }));
-
-    const monthlyFlowBars = Array.from(monthlyMap.entries()).slice(-6).map(([label, d]) => ({
-      value: Number(Math.max(d.ingresos, d.egresos).toFixed(2)),
-      label,
-      frontColor: d.ingresos >= d.egresos ? primaryColor : '#fb7185',
-    }));
-
-    const typePieData = [
-      { value: Number(selectedIngresos.toFixed(2)), color: '#34d399', text: 'Ingresos' },
-      { value: Number(selectedEgresos.toFixed(2)), color: '#f87171', text: 'Egresos' },
-    ].filter((i) => i.value > 0);
-
-    const palette = [tintColor, '#f59e0b', '#a78bfa', primaryColor, '#fb7185', iconColor];
-    const categoryPieData = Array.from(categories.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([label, value], index) => ({
-        value: Number(value.toFixed(2)),
-        color: palette[index % palette.length],
-        text: label.length > 12 ? `${label.slice(0, 12)}...` : label,
-      }));
-
-    const weekdayActivityBars = weekdayNames.map((label, index) => ({
-      label,
-      value: weekdayMovements[index],
-      frontColor: tintColor,
-    }));
-
-    const amountRangeBars = amountRangeLabels.map((label, index) => ({
-      label,
-      value: amountRangeBuckets[index],
-      frontColor: tintColor,
-    }));
-
-    return {
-      cumulativeLineData,
-      trendLineData,
-      movementBars,
-      monthlyFlowBars,
-      weekdayActivityBars,
-      amountRangeBars,
-      typePieData,
-      categoryPieData,
-      selectedNeto: Number((selectedIngresos - selectedEgresos).toFixed(2)),
-    };
-  }, [chartDataToDisplay, tintColor, primaryColor, primaryDarkColor, iconColor]);
-
   const tipoOptions = useMemo(() => {
     const found = new Set<string>();
     transacciones.forEach((tx) => {
@@ -706,6 +204,11 @@ export default function HistorialScreen() {
     const found = new Set<string>();
     transacciones.forEach((tx) => {
       if (tx?.presupuestoCategoria) found.add(tx.presupuestoCategoria);
+      if (tx?.origen === 'transferencia-ahorro' || tx?.origen === 'retiro-ahorro') found.add('Ahorro');
+      tx?.groupItems?.forEach((item: any) => {
+        const category = item.presupuestoCategoria || item.categoria;
+        if (category) found.add(category);
+      });
     });
     return Array.from(found).sort((a, b) => a.localeCompare(b));
   }, [transacciones]);
@@ -714,6 +217,11 @@ export default function HistorialScreen() {
     const found = new Set<string>();
     transacciones.forEach((tx) => {
       if (tx?.preestablecidoMainNombre) found.add(tx.preestablecidoMainNombre);
+      if (tx?.grupoNombre) found.add(tx.grupoNombre);
+      tx?.groupItems?.forEach((item: any) => {
+        const preset = item.preestablecidoMainNombre || item.mainNombre;
+        if (preset) found.add(preset);
+      });
     });
     return Array.from(found).sort((a, b) => a.localeCompare(b));
   }, [transacciones]);
@@ -724,12 +232,18 @@ export default function HistorialScreen() {
     const found = new Set<string>();
     transacciones.forEach((tx) => {
       const category = tx?.presupuestoCategoria || tx?.categoria || tx?.categoriaNombre;
-      if (!selectedCategorias.includes(category || '')) return;
-
       const subcategoria = tx?.subcategoria || tx?.subCategoria || tx?.subcategory || tx?.subcategoriaNombre;
-      if (subcategoria && String(subcategoria).trim()) {
+      if (selectedCategorias.includes(category || '') && subcategoria && String(subcategoria).trim()) {
         found.add(String(subcategoria));
       }
+
+      tx?.groupItems?.forEach((item: any) => {
+        const itemCategory = item.presupuestoCategoria || item.categoria;
+        const itemSubcategory = item.subcategoria || item.subCategoria || item.subcategory || item.subcategoriaNombre;
+        if (selectedCategorias.includes(itemCategory || '') && itemSubcategory && String(itemSubcategory).trim()) {
+          found.add(String(itemSubcategory));
+        }
+      });
     });
 
     return Array.from(found).sort((a, b) => a.localeCompare(b));
@@ -784,7 +298,7 @@ export default function HistorialScreen() {
 
     filtered.forEach((tx) => {
       const tipo = tx.tipo || 'N/A';
-      const categoria = tx.presupuestoCategoria || tx.preestablecidoMainNombre || 'Sin categoría';
+      const categoria = getTransactionCategory(tx) || tx.preestablecidoMainNombre || 'Sin categoría';
       tipoMap.set(tipo, (tipoMap.get(tipo) || 0) + 1);
       categoriaMap.set(categoria, (categoriaMap.get(categoria) || 0) + 1);
     });
@@ -849,36 +363,54 @@ export default function HistorialScreen() {
     }
 
     if (selectedTipos.length > 0) {
-      filteredData = filteredData.filter((t) => selectedTipos.includes(t.tipo));
+      filteredData = filteredData.filter((t) => matchesTransactionOrGroup(t, (item) => selectedTipos.includes(item.tipo)));
     }
 
     if (selectedCategorias.length > 0) {
-      filteredData = filteredData.filter((t) => selectedCategorias.includes(t.presupuestoCategoria || ''));
+      filteredData = filteredData.filter((t) => matchesTransactionOrGroup(t, (item) => selectedCategorias.includes(getTransactionCategory(item))));
     }
 
     if (selectedSubcategorias.length > 0) {
-      filteredData = filteredData.filter((t) => {
-        const subcategoria = t.subcategoria || t.subCategoria || t.subcategory || t.subcategoriaNombre;
+      filteredData = filteredData.filter((t) => matchesTransactionOrGroup(t, (item) => {
+        const subcategoria = item.subcategoria || item.subCategoria || item.subcategory || item.subcategoriaNombre;
         return subcategoria && selectedSubcategorias.includes(String(subcategoria));
-      });
+      }));
     }
 
     if (selectedPreestablecidos.length > 0) {
-      filteredData = filteredData.filter((t) => selectedPreestablecidos.includes(t.preestablecidoMainNombre || ''));
+      filteredData = filteredData.filter((t) => matchesTransactionOrGroup(t, (item) => selectedPreestablecidos.includes(item.preestablecidoMainNombre || item.mainNombre || '')));
     }
 
     if (amountFilter !== 'all') {
       const amountRange = amountFilter.split('-').length > 1 ? amountFilter : null;
-      filteredData = filteredData.filter((t) => {
-        const amount = Number(t.monto || 0);
+      filteredData = filteredData.filter((t) => matchesTransactionOrGroup(t, (item) => {
+        const amount = Number(item.monto || 0) * Number(item.quantity || 1);
         if (amountFilter === '5000+') return amount >= 5000;
         if (!amountRange) return true;
         const [minRaw, maxRaw] = amountRange.split('-');
         const min = Number(minRaw);
         const max = Number(maxRaw);
         return amount >= min && amount <= max;
+      }));
+    }
+
+    const searchTerm = transactionSearch.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (searchTerm) {
+      filteredData = filteredData.filter((transaction) => {
+        const groupItemsText = Array.isArray(transaction.groupItems)
+          ? transaction.groupItems.map((item: any) => `${item.nombre || ''} ${item.categoria || ''}`).join(' ')
+          : '';
+        const searchableText = `${transaction.descripcion || ''} ${getTransactionCategory(transaction)} ${transaction.preestablecidoMainNombre || ''} ${transaction.grupoNombre || ''} ${groupItemsText}`
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+        return searchableText.includes(searchTerm);
       });
     }
+
+    filteredData = filteredData
+      .map(filterGroupItems)
+      .filter((transaction): transaction is any => Boolean(transaction));
 
     filteredData.sort((a, b) => {
       const dateA = a.date || new Date(0);
@@ -887,36 +419,7 @@ export default function HistorialScreen() {
     });
 
     setFiltered(filteredData);
-    setFilteredChart([...filteredData].reverse());
-  }, [transacciones, range, startDate, endDate, selectedTipos, selectedCategorias, selectedSubcategorias, selectedPreestablecidos, selectedMonth, amountFilter]);
-
-  const handleChartRailScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (visibleChartCards.length === 0) return;
-    const x = event.nativeEvent.contentOffset.x;
-    const index = Math.round(x / (chartCardWidth + chartCardGap));
-    if (index !== activeChartIndex) {
-      setActiveChartIndex(Math.max(0, Math.min(index, visibleChartCards.length - 1)));
-    }
-  };
-
-  const handleOpenChartOrderCustomization = () => {
-    if (subscriptionActive) {
-      setShowChartOrderModal(true);
-      return;
-    }
-
-    Alert.alert(
-      'Función Premium',
-      'Personalizar el orden de gráficas está disponible con suscripción activa.',
-      [
-        { text: 'Ahora no', style: 'cancel' },
-        {
-          text: 'Ver suscripción',
-          onPress: () => router.push({ pathname: '/(screens)/Settings', params: { openSubscription: '1' } }),
-        },
-      ],
-    );
-  };
+  }, [transacciones, range, startDate, endDate, selectedTipos, selectedCategorias, selectedSubcategorias, selectedPreestablecidos, selectedMonth, amountFilter, transactionSearch]);
 
   const handleToggleAdvancedFilters = () => {
     if (!subscriptionActive) {
@@ -935,64 +438,6 @@ export default function HistorialScreen() {
     }
 
     setShowAdvancedFilters((prev) => !prev);
-  };
-
-  const toggleFavoriteChart = async (chart: { key: HistorialChartKey; title: string; subtitle: string }) => {
-    if (!userId) return;
-
-    const exists = favoriteCharts.some((item) => item.key === chart.key);
-    if (!exists && !subscriptionActive && favoriteCharts.length >= 1) {
-      Alert.alert(
-        'Función Premium',
-        'Sin suscripción puedes tener 1 gráfica favorita. Activa premium para agregar más.',
-        [
-          { text: 'Ahora no', style: 'cancel' },
-          {
-            text: 'Ver suscripción',
-            onPress: () => router.push({ pathname: '/(screens)/Settings', params: { openSubscription: '1' } }),
-          },
-        ],
-      );
-      return;
-    }
-
-    const next = exists
-      ? favoriteCharts.filter((item) => item.key !== chart.key)
-      : [...favoriteCharts, chart];
-
-    setFavoriteCharts(next);
-
-    try {
-      const key = `konta.historial.favoriteCharts.${userId}`;
-      await AsyncStorage.setItem(key, JSON.stringify(next));
-      if (Platform.OS === 'android') {
-        ToastAndroid.show(exists ? 'Gráfica quitada de favoritos' : 'Gráfica agregada a favoritos', ToastAndroid.SHORT);
-      }
-    } catch (error) {
-      console.log('No se pudo guardar favoritas:', error);
-    }
-  };
-
-  const toggleChartVisibility = (key: HistorialChartKey, value: boolean) => {
-    setChartCardsConfig((prev) => prev.map((item) => (item.key === key ? { ...item, visible: value } : item)));
-  };
-
-  const moveChartUp = (index: number) => {
-    if (index === 0) return;
-    setChartCardsConfig((prev) => {
-      const next = [...prev];
-      [next[index - 1], next[index]] = [next[index], next[index - 1]];
-      return next;
-    });
-  };
-
-  const moveChartDown = (index: number) => {
-    setChartCardsConfig((prev) => {
-      if (index === prev.length - 1) return prev;
-      const next = [...prev];
-      [next[index], next[index + 1]] = [next[index + 1], next[index]];
-      return next;
-    });
   };
 
   const showPicker = (type: 'start' | 'end' | 'month') => {
@@ -1047,14 +492,62 @@ export default function HistorialScreen() {
 
   const activeAdvancedFilters = selectedTipos.length + selectedCategorias.length + selectedSubcategorias.length + selectedPreestablecidos.length + (amountFilter !== 'all' ? 1 : 0) + (selectedMonth ? 1 : 0);
 
-  const chartSelectionModeLabel =
-    chartSelectionMode === 'distributed'
-      ? 'Distribuidas'
-      : chartSelectionMode === 'balancedWeek'
-        ? 'Semanal'
-        : chartSelectionMode === 'balancedMonth'
-          ? 'Mensual'
-          : 'Recientes';
+  const matchesTransactionOrGroup = (transaction: any, predicate: (item: any) => boolean) => {
+    if (predicate(transaction)) return true;
+    return Array.isArray(transaction.groupItems) && transaction.groupItems.some((item: any) => predicate(item));
+  };
+
+  const filterGroupItems = (transaction: any) => {
+    if (!Array.isArray(transaction.groupItems) || transaction.groupItems.length === 0) return transaction;
+
+    const groupMatchesPreset = selectedPreestablecidos.length > 0 && selectedPreestablecidos.includes(
+      transaction.preestablecidoMainNombre || transaction.grupoNombre || ''
+    );
+    const hasOtherItemFilters = selectedTipos.length > 0
+      || selectedCategorias.length > 0
+      || selectedSubcategorias.length > 0
+      || amountFilter !== 'all';
+    if (groupMatchesPreset && !hasOtherItemFilters) return transaction;
+
+    const hasItemFilters = selectedTipos.length > 0
+      || selectedCategorias.length > 0
+      || selectedSubcategorias.length > 0
+      || selectedPreestablecidos.length > 0
+      || amountFilter !== 'all';
+    if (!hasItemFilters) return transaction;
+
+    const items = transaction.groupItems.filter((item: any) => {
+      if (selectedTipos.length > 0 && !selectedTipos.includes(item.tipo)) return false;
+
+      const category = item.presupuestoCategoria || item.categoria || '';
+      if (selectedCategorias.length > 0 && !selectedCategorias.includes(category)) return false;
+
+      const subcategoria = item.subcategoria || item.subCategoria || item.subcategory || item.subcategoriaNombre;
+      if (selectedSubcategorias.length > 0 && !selectedSubcategorias.includes(String(subcategoria || ''))) return false;
+
+      const preset = item.preestablecidoMainNombre || item.mainNombre || '';
+      if (selectedPreestablecidos.length > 0 && !selectedPreestablecidos.includes(preset)) return false;
+
+      if (amountFilter !== 'all') {
+        const amount = Number(item.monto || 0) * Number(item.quantity || 1);
+        if (amountFilter === '5000+' && amount < 5000) return false;
+        if (amountFilter !== '5000+') {
+          const [minRaw, maxRaw] = amountFilter.split('-');
+          if (amount < Number(minRaw) || amount > Number(maxRaw)) return false;
+        }
+      }
+
+      return true;
+    });
+
+    if (items.length === 0) return null;
+
+    return {
+      ...transaction,
+      groupItems: items,
+      monto: items.reduce((sum: number, item: any) => sum + Number(item.monto || 0) * Number(item.quantity || 1), 0),
+    };
+  };
 
   const handleDeleteTransaction = (tx: any) => {
     if (!userId || !tx?.id) return;
@@ -1106,6 +599,9 @@ export default function HistorialScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor:backgroundColor }}>
+      <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={{ flex: 1 }}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -1366,7 +862,7 @@ export default function HistorialScreen() {
 
               {preestablecidoOptions.length > 0 && (
                 <View style={{ marginTop: 4 }}>
-                  <ThemedText style={{ fontSize: 13, marginBottom: 6, color: '#9ca3af' }}>Preestablecido</ThemedText>
+                  <ThemedText style={{ fontSize: 13, marginBottom: 6, color: '#9ca3af' }}>Grupo</ThemedText>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 2 }}>
                     {preestablecidoOptions.map((opcion) => (
                       <Chip
@@ -1414,7 +910,7 @@ export default function HistorialScreen() {
         
         style={{
           width: "100%",
-          backgroundColor: cardsMain,
+          backgroundColor: graficaFondoColor,
           borderRadius: 20,
           padding: 12,
           marginBottom: 10,
@@ -1436,11 +932,11 @@ export default function HistorialScreen() {
               fontSize: 16,
             }}
           >
-            Gráficas
+            Análisis
           </ThemedText>
-          <TouchableOpacity onPress={toggleExpanded}>
+          <TouchableOpacity onPress={() => router.push('/(screens)/AnalisisScreen')} accessibilityLabel="Abrir análisis financiero">
             <Ionicons
-              name="open-outline"
+              name="arrow-forward-circle-outline"
               size={RFValue(26)}
               color={textColor}
             />
@@ -1449,6 +945,7 @@ export default function HistorialScreen() {
       </Animated.View>
 
       {/* LISTA DE TRANSACCIONES */}
+      
       <View style={{ marginBottom: 150 }}>
         <View
           style={{
@@ -1459,15 +956,39 @@ export default function HistorialScreen() {
             marginTop:15
           }}
         >
-          <ThemedText
-            style={{
-              fontWeight: "600",
-              marginBottom: 8,
-              fontSize: 16,
-            }}
-          >
-            Transacciones
-          </ThemedText>
+          
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: transactionSearchOpen ? 8 : 4 }}>
+            {transactionSearchOpen ? (
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: `${borderColor}22`, borderRadius: 10, paddingHorizontal: 8, marginRight: 8 }}>
+                <Ionicons name="search-outline" size={18} color={iconColor} />
+                <TextInput
+                  autoFocus
+                  value={transactionSearch}
+                  onChangeText={setTransactionSearch}
+                  placeholder="Buscar transacciones"
+                  placeholderTextColor={iconColor}
+                  style={{ flex: 1, color: textColor, paddingVertical: 8, paddingHorizontal: 7, fontSize: 13 }}
+                />
+                {transactionSearch.length > 0 && (
+                  <TouchableOpacity onPress={() => setTransactionSearch('')} style={{ padding: 3 }}>
+                    <Ionicons name="close-circle" size={17} color={iconColor} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <ThemedText style={{ fontWeight: '600', fontSize: 16 }}>Transacciones</ThemedText>
+            )}
+            <TouchableOpacity
+              onPress={() => {
+                setTransactionSearchOpen((previous) => !previous);
+                if (transactionSearchOpen) setTransactionSearch('');
+              }}
+              accessibilityLabel={transactionSearchOpen ? 'Cerrar búsqueda de transacciones' : 'Buscar transacciones'}
+              style={{ padding: 5 }}
+            >
+              <Ionicons name={transactionSearchOpen ? 'close-outline' : 'search-outline'} size={22} color={textColor} />
+            </TouchableOpacity>
+          </View>
 
           {filtered.length === 0 ? (
             <ThemedText style={{ color: "#aaa", textAlign: "center", marginTop: 10 }}>
@@ -1482,7 +1003,7 @@ export default function HistorialScreen() {
                 onLongPress={() => handleDeleteTransaction(tx)}
                 style={{
                   flexDirection: "row",
-                  alignItems: "center",
+                  alignItems: "flex-start",
                   paddingVertical: 10,
                   borderBottomWidth: 1,
                   borderColor: "rgba(255,255,255,0.08)",
@@ -1490,7 +1011,7 @@ export default function HistorialScreen() {
                   justifyContent: 'space-between',
                 }}
               >
-                <View style={{ flexDirection: "row", alignItems: "center", maxWidth: 250, flex: 1 }}>
+                <View style={{ flexDirection: "row", alignItems: "flex-start", maxWidth: 250, flex: 1 }}>
                   {tx.groupItems?.length ? (
                     <ThemedText style={{ fontSize: 20, marginRight: 8 }}>{tx.grupoIcono || '📦'}</ThemedText>
                   ) : null}
@@ -1504,9 +1025,9 @@ export default function HistorialScreen() {
                           (Automático)
                         </ThemedText>
                       )}
-                      {tx.presupuestoCategoria && (
+                      {(tx.presupuestoCategoria || tx.origen === 'transferencia-ahorro' || tx.origen === 'retiro-ahorro') && (
                         <ThemedText style={{ color: "#9ca3af", fontSize: 11, marginLeft: 6 }}>
-                          #{tx.presupuestoCategoria}
+                          #{getTransactionCategory(tx)}
                         </ThemedText>
                       )}
                       {tx.preestablecidoMainNombre && (
@@ -1516,7 +1037,7 @@ export default function HistorialScreen() {
                       )}
                     </View>
                     <ThemedText style={{ color: "#aaa", fontSize: 12 }}>
-                      {format(tx.date || tx.fecha?.toDate?.(), "dd/MM/yyyy")}
+                      {format(toSafeDate(tx.date || tx.fecha), "dd/MM/yyyy")}
                     </ThemedText>
                     {tx.groupItems?.length ? (
                       <ThemedText style={{ color: iconColor, fontSize: 11, marginTop: 3 }}>
@@ -1568,620 +1089,7 @@ export default function HistorialScreen() {
         </View>
       </View>
       </ScrollView>
-
-      <BottomSheetModal
-        ref={chartsBottomSheetRef}
-        index={0}
-        snapPoints={chartsBottomSheetSnapPoints}
-        enableDynamicSizing={false}
-        backdropComponent={renderChartsBackdrop}
-        onDismiss={() => setIsExpanded(false)}
-        backgroundStyle={{ backgroundColor }}
-        handleIndicatorStyle={{ backgroundColor: `${primaryColor}aa` }}
-      >
-        <View style={{ flex: 1, backgroundColor, paddingTop: 24, paddingHorizontal: 0, paddingBottom: 12 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 12 }}>
-            <View>
-              <ThemedText style={{ fontSize: 20, fontWeight: '700' }}>Gráficas</ThemedText>
-              {filteredChart.length > 0 && (
-                <ThemedText style={{ color: '#9ca3af', fontSize: 12, marginTop: 2 }}>
-                  {chartSelectionModeLabel} · {chartDataToDisplay.length}/{filteredChart.length}
-                </ThemedText>
-              )}
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <TouchableOpacity
-              onPress={handleOpenChartOrderCustomization}
-              style={{
-                alignSelf: 'flex-end',
-                marginTop: 8,
-                backgroundColor: subscriptionActive ? `${primaryColor}18` : `${primaryColor}12`,
-                borderRadius: 999,
-                paddingHorizontal: 10,
-                paddingVertical: 6,
-                borderWidth: 1,
-                borderColor: subscriptionActive ? `${primaryColor}35` : `${primaryColor}25`,
-              }}
-            >
-            <ThemedText style={{ fontSize: 12, fontWeight: '700', opacity: subscriptionActive ? 1 : 0.8 }}>
-              {subscriptionActive ? 'Personalizar orden' : 'Personalizar orden • Suscripción'}
-            </ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setIsExpanded(false)}>
-              <Ionicons name="close-outline" size={RFValue(30)} color={textColor} />
-            </TouchableOpacity>
-            </View>
-          </View>
-
-          {chartDataToDisplay.length > 0 ? (
-            <>
-              <ScrollView
-                horizontal
-                snapToInterval={chartCardWidth + chartCardGap}
-                snapToAlignment="start"
-                decelerationRate="fast"
-                onScroll={handleChartRailScroll}
-                scrollEventThrottle={16}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{
-                  paddingHorizontal: (screenWidth - chartCardWidth) / 2,
-                }}
-              >
-                {visibleChartCards.map((card, index) => (
-                  <View
-                    key={card.key}
-                    style={{
-                      width: chartCardWidth,
-                      minHeight: chartCardHeight,
-                      marginRight: chartCardGap,
-                      borderRadius: 16,
-                      padding: 12,
-                      backgroundColor: cardsMain,
-                      borderWidth: index === activeChartIndex ? 1.5 : 1,
-                      borderColor: index === activeChartIndex ? tintColor : borderColor,
-                      transform: [{ scale: index === activeChartIndex ? 1 : 0.985 }],
-                      opacity: index === activeChartIndex ? 1 : 0.9,
-                    }}
-                  >
-                    <ThemedText style={{ fontSize: 14, fontWeight: '700' }}>{card.title}</ThemedText>
-                    <ThemedText style={{ marginTop: 2, color: iconColor, fontSize: 11 }}>{card.subtitle}</ThemedText>
-                    <TouchableOpacity
-                      onPress={() => toggleFavoriteChart(card as { key: HistorialChartKey; title: string; subtitle: string })}
-                      style={{ position: 'absolute', top: 10, right: 10, padding: 4 }}
-                    >
-                      <Ionicons
-                        name={favoriteCharts.some((item) => item.key === card.key) ? 'star' : 'star-outline'}
-                        size={18}
-                        color={favoriteCharts.some((item) => item.key === card.key) ? '#fbbf24' : iconColor}
-                      />
-                    </TouchableOpacity>
-
-                    {card.key === 'overview' && (
-                      <View style={{ marginTop: 8, justifyContent: 'center', alignItems: 'center' }}>
-                        {chartDataToDisplay.length > 0 ? (
-                          <LineChartKit
-                            data={{
-                              labels: chartDataToDisplay.map((tx, index) => {
-                                const step = Math.max(1, Math.ceil(chartDataToDisplay.length / 6));
-                                const showLabel = index % step === 0 || index === chartDataToDisplay.length - 1;
-                                return showLabel ? format(tx.date || new Date(), 'dd/MM/yy') : '';
-                              }),
-                              datasets: [
-                                {
-                                  data: chartDataToDisplay.map(tx => Number(tx.tipo === 'ingreso' ? tx.monto : -tx.monto)),
-                                }
-                              ]
-                            }}
-                            width={chartCardWidth - 20}
-                            height={250}
-                            chartConfig={{
-                              backgroundColor: cardsMain,
-                              backgroundGradientFrom: cardsMain,
-                              backgroundGradientTo: cardsMain,
-                              decimalPlaces: 0,
-                              color: () => tintColor,
-                              labelColor: () => iconColor,
-                              style: { borderRadius: 0 },
-                              propsForDots: { r: '2', strokeWidth: '0', stroke: tintColor },
-                              propsForBackgroundLines: { strokeWidth: '0' },
-                              propsForLabels: { fontSize: 9 },
-                            }}
-                            bezier
-                            withDots
-                            withInnerLines={false}
-                            withVerticalLabels={true}
-                            withHorizontalLabels={false}
-                            withOuterLines={false}
-                            style={{ borderRadius: 0, paddingRight: 0}} 
-                          />
-                        ) : (
-                          <ThemedText style={{ color: '#aaa', marginTop: 16 }}>Sin datos</ThemedText>
-                        )}
-                      </View>
-                    )}
-
-                    {card.key === 'bars' && (
-                        <ScrollView style={{ marginTop: 8 }} showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
-                        <ThemedText style={{ color: '#cbd5e1', fontSize: 11, marginBottom: 4 }}>Movimientos diarios</ThemedText>
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          nestedScrollEnabled={true}
-                          scrollEnabled={true}
-                          contentContainerStyle={{ paddingRight: 24 }}
-                        >
-                          <BarChart
-                            data={chartSummary.movementBars}
-                            barWidth={10}
-                            spacing={getBarChartLayout(chartSummary.movementBars.length, 10, chartCardWidth + extraChartRightSpace).spacing}
-                            roundedTop
-                            hideRules
-                            noOfSections={3}
-                            yAxisThickness={0}
-                            xAxisThickness={0}
-                            xAxisColor={borderColor}
-                            yAxisColor={borderColor}
-                            xAxisLabelTextStyle={{ ...axisLabelTextStyle, textAlign: 'center' }}
-                            yAxisTextStyle={axisLabelTextStyle}
-                            xAxisTextNumberOfLines={2}
-                            xAxisLabelsHeight={36}
-                            width={getBarChartLayout(chartSummary.movementBars.length, 10, chartCardWidth + extraChartRightSpace).width}
-                          />
-                        </ScrollView>
-                        <ThemedText style={{ color: '#cbd5e1', fontSize: 11, marginTop: 10, marginBottom: 4 }}>Flujo mensual (mayor entre ingresos/egresos)</ThemedText>
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          nestedScrollEnabled={true}
-                          scrollEnabled={true}
-                          contentContainerStyle={{ paddingRight: 24 }}
-                        >
-                          <BarChart
-                            data={chartSummary.monthlyFlowBars}
-                            barWidth={10}
-                            spacing={getBarChartLayout(chartSummary.monthlyFlowBars.length, 10, chartCardWidth + extraChartRightSpace).spacing}
-                            roundedTop
-                            hideRules
-                            noOfSections={4}
-                            yAxisThickness={0}
-                            xAxisThickness={0}
-                            xAxisColor={borderColor}
-                            yAxisColor={borderColor}
-                            xAxisLabelTextStyle={{ ...axisLabelTextStyle, textAlign: 'center' }}
-                            yAxisTextStyle={axisLabelTextStyle}
-                            xAxisTextNumberOfLines={2}
-                            xAxisLabelsHeight={36}
-                            width={getBarChartLayout(chartSummary.monthlyFlowBars.length, 10, chartCardWidth + extraChartRightSpace).width}
-                          />
-                        </ScrollView>
-                      </ScrollView>
-                    )}
-
-                    {card.key === 'weekdayActivity' && (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true} style={{ marginTop: 10 }}>
-                        <View style={{ minWidth: Math.max(chartCardWidth + 30, chartSummary.weekdayActivityBars.length * 64) }}>
-                          <ThemedText style={{ color: iconColor, fontSize: 11, marginBottom: 6 }}>
-                            Movimientos por día de semana
-                          </ThemedText>
-                          <BarChart
-                            data={chartSummary.weekdayActivityBars}
-                            barWidth={18}
-                            spacing={getBarChartLayout(chartSummary.weekdayActivityBars.length, 18, chartCardWidth + 40, 20).spacing}
-                            roundedTop
-                            hideRules
-                            noOfSections={4}
-                            yAxisThickness={0}
-                            xAxisThickness={0}
-                            xAxisColor={borderColor}
-                            yAxisColor={borderColor}
-                            xAxisLabelTextStyle={{ ...axisLabelTextStyle, textAlign: 'center' }}
-                            yAxisTextStyle={axisLabelTextStyle}
-                            xAxisTextNumberOfLines={2}
-                            xAxisLabelsHeight={30}
-                            width={getBarChartLayout(chartSummary.weekdayActivityBars.length, 18, chartCardWidth + 40, 20).width}
-                          />
-                        </View>
-                      </ScrollView>
-                    )}
-
-                    {card.key === 'amountRanges' && (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true} style={{ marginTop: 10 }}>
-                        <View style={{ minWidth: Math.max(chartCardWidth + 40, chartSummary.amountRangeBars.length * 80) }}>
-                          <ThemedText style={{ color: iconColor, fontSize: 11, marginBottom: 6 }}>
-                            Cuántas transacciones caen en cada rango
-                          </ThemedText>
-                          <BarChart
-                            data={chartSummary.amountRangeBars}
-                            barWidth={20}
-                            spacing={getBarChartLayout(chartSummary.amountRangeBars.length, 20, chartCardWidth + 60, 22).spacing}
-                            roundedTop
-                            hideRules
-                            noOfSections={4}
-                            yAxisThickness={0}
-                            xAxisThickness={0}
-                            xAxisColor={borderColor}
-                            yAxisColor={borderColor}
-                            xAxisLabelTextStyle={{ ...axisLabelTextStyle, textAlign: 'center' }}
-                            yAxisTextStyle={axisLabelTextStyle}
-                            xAxisTextNumberOfLines={2}
-                            xAxisLabelsHeight={30}
-                            width={getBarChartLayout(chartSummary.amountRangeBars.length, 20, chartCardWidth + 60, 22).width}
-                          />
-                        </View>
-                      </ScrollView>
-                    )}
-
-                    {card.key === 'pieType' && (
-                      <View style={{ marginTop: "35%", alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 }}>
-                        {chartSummary.typePieData.length > 0 ? (
-                          <PieChart
-                            data={chartSummary.typePieData}
-                            donut
-                            radius={100}
-                            innerRadius={50}
-                            centerLabelComponent={() => (
-                              <View style={{ alignItems: 'center' }}>
-                                <ThemedText style={{ color: '#9ca3af', fontSize: 11 }}>Balance</ThemedText>
-                                <ThemedText style={{ color: '#9ca3af', fontSize: 9 }}>{chartSummary.selectedNeto >= 0 ? 'Positivo' : 'Negativo'}</ThemedText>
-                              </View>
-                            )}
-                          />
-                        ) : (
-                          <ThemedText style={{ color: '#aaa', marginTop: 16 }}>Sin datos suficientes</ThemedText>
-                        )}
-                      </View>
-                    )}
-
-                    {card.key === 'pieCategory' && (
-                      <View style={{ marginTop: "10%", alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 }}>
-                        {chartSummary.categoryPieData.length > 0 ? (
-                          <>
-                            <PieChart
-                              data={chartSummary.categoryPieData}
-                              donut
-                              radius={100}
-                              innerRadius={50}
-                            />
-                            <View style={{ width: '100%', marginTop: 8, paddingHorizontal: 6 }}>
-                              {chartSummary.categoryPieData.map((item) => (
-                                <View key={`${item.text}-${item.color}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                  <View style={{ width: 10, height: 10, borderRadius: 6, backgroundColor: item.color, marginRight: 8 }} />
-                                  <ThemedText style={{ fontSize: 10, color: '#cbd5e1' }}>{item.text}</ThemedText>
-                                </View>
-                              ))}
-                            </View>
-                          </>
-                        ) : (
-                          <ThemedText style={{ color: '#aaa', marginTop: 16 }}>Sin egresos categorizados</ThemedText>
-                        )}
-                      </View>
-                    )}
-
-                    {card.key === 'cumulative' && (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true} style={{ marginTop: 8 }}>
-                        <LineChart
-                          data={chartSummary.cumulativeLineData.length > 0 ? chartSummary.cumulativeLineData : chartData}
-                          thickness={2}
-                          color="#818cf8"
-                          areaChart
-                          curved
-                          startFillColor="#6366f1"
-                          endFillColor="#6366f100"
-                          yAxisThickness={0}
-                          xAxisColor={borderColor}
-                          yAxisColor={borderColor}
-                          xAxisLabelTextStyle={axisLabelTextStyle}
-                          yAxisTextStyle={axisLabelTextStyle}
-                          noOfSections={4}
-                          width={Math.max(chartCardWidth - 30, chartSummary.cumulativeLineData.length * 48)}
-                        />
-                      </ScrollView>
-                    )}
-
-                    {card.key === 'trend' && (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true} style={{ marginTop: 8 }} scrollEnabled={true}>
-                        <LineChart
-                          data={chartSummary.trendLineData.length > 0 ? chartSummary.trendLineData : chartData}
-                          thickness={2}
-                          color="#22d3ee"
-                          hideDataPoints={false}
-                          dataPointsColor="#67e8f9"
-                          curved
-                          yAxisThickness={0}
-                          xAxisColor={borderColor}
-                          yAxisColor={borderColor}
-                          xAxisLabelTextStyle={axisLabelTextStyle}
-                          yAxisTextStyle={axisLabelTextStyle}
-                          noOfSections={4}
-                          width={Math.max(chartCardWidth - 20, Math.max(chartCardWidth + 100, chartSummary.trendLineData.length * 56))}
-                        />
-                      </ScrollView>
-                    )}
-
-                    {card.key === 'cryptoQuantity' && (
-                      <CryptoHistoryChart
-                        transactions={historialCripto}
-                        chartType="crypto"
-                        chartWidth={chartCardWidth}
-                        lineColor={tintColor}
-                        borderColor={borderColor}
-                      />
-                    )}
-
-                    {card.key === 'savingsTotal' && (
-                      <CryptoHistoryChart
-                        transactions={historialAhorros}
-                        chartType="savings"
-                        chartWidth={chartCardWidth}
-                        lineColor={tintColor}
-                        borderColor={borderColor}
-                      />
-                    )}
-                  </View>
-                ))}
-              </ScrollView>
-
-              <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 12 }}>
-                {visibleChartCards.map((_, index) => (
-                  <View
-                    key={`dot-${index}`}
-                    style={{
-                      width: index === activeChartIndex ? 18 : 8,
-                      height: 8,
-                      borderRadius: 5,
-                      backgroundColor: index === activeChartIndex ? '#818cf8' : 'rgba(148,163,184,0.35)',
-                    }}
-                  />
-                ))}
-              </View>
-
-              {visibleChartCards.length === 0 && (
-                <ThemedText style={{ color: iconColor, textAlign: 'center', marginTop: 16 }}>
-                  No hay gráficas visibles. Personaliza el orden para activar al menos una.
-                </ThemedText>
-              )}
-
-              <ThemedText style={{ color: '#9ca3af', fontSize: 12, marginTop: 12, textAlign: 'center' }}>
-                Mostrando {chartDataToDisplay.length} de {filteredChart.length} transacciones
-              </ThemedText>
-            </>
-          ) : (
-            <ThemedText style={{ color: '#aaa', textAlign: 'center', marginTop: 20 }}>
-              No hay datos para mostrar
-            </ThemedText>
-          )}
-
-          {filteredChart.length > 0 && (
-            <View style={{ marginTop: 10, paddingHorizontal: 12 }}>
-              <View
-                style={{
-                  backgroundColor: cardsMain,
-                  borderRadius: 16,
-                  borderWidth: 1,
-                  borderColor: borderColor,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                }}
-              >
-                <TouchableOpacity
-                  onPress={() => setShowChartControls((prev) => !prev)}
-                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
-                >
-                  <View>
-                    <ThemedText style={{ color: textColor, fontSize: 12 }}>
-                      Ajustes de visualización
-                    </ThemedText>
-                    <ThemedText style={{ color: iconColor, fontSize: 11, marginTop: 2 }}>
-                      {chartSelectionModeLabel} · {chartDataToDisplay.length}/{filteredChart.length}
-                    </ThemedText>
-                  </View>
-                  <Ionicons
-                    name={showChartControls ? 'chevron-up-outline' : 'chevron-down-outline'}
-                    size={RFValue(22)}
-                    color={iconColor}
-                  />
-                </TouchableOpacity>
-
-                {showChartControls && (
-                  <>
-                    <View style={{ marginTop: 10 }}>
-                      <ThemedText style={{ color: textColor, fontSize: 12, marginBottom: 6 }}>
-                        Modo de selección
-                      </ThemedText>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                        <TouchableOpacity
-                          onPress={() => setChartSelectionMode('distributed')}
-                          style={{
-                            paddingHorizontal: 10,
-                            paddingVertical: 7,
-                            borderRadius: 12,
-                            backgroundColor: chartSelectionMode === 'distributed' ? tintColor : progressBg,
-                            borderWidth: 1,
-                            borderColor: chartSelectionMode === 'distributed' ? tintColor : 'transparent',
-                          }}
-                        >
-                          <ThemedText style={{ fontSize: RFValue(10), color: chartSelectionMode === 'distributed' ? '#ffffff' : textColor, fontWeight: '700' }}>
-                            Distribuidas
-                          </ThemedText>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => setChartSelectionMode('balancedWeek')}
-                          style={{
-                            paddingHorizontal: 10,
-                            paddingVertical: 7,
-                            borderRadius: 12,
-                            backgroundColor: chartSelectionMode === 'balancedWeek' ? tintColor : progressBg,
-                            borderWidth: 1,
-                            borderColor: chartSelectionMode === 'balancedWeek' ? tintColor : 'transparent',
-                          }}
-                        >
-                          <ThemedText style={{ fontSize: RFValue(10), color: chartSelectionMode === 'balancedWeek' ? '#ffffff' : textColor, fontWeight: '700' }}>
-                            Semanal
-                          </ThemedText>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => setChartSelectionMode('balancedMonth')}
-                          style={{
-                            paddingHorizontal: 10,
-                            paddingVertical: 7,
-                            borderRadius: 12,
-                            backgroundColor: chartSelectionMode === 'balancedMonth' ? tintColor : progressBg,
-                            borderWidth: 1,
-                            borderColor: chartSelectionMode === 'balancedMonth' ? tintColor : 'transparent',
-                          }}
-                        >
-                          <ThemedText style={{ fontSize: RFValue(10), color: chartSelectionMode === 'balancedMonth' ? '#ffffff' : textColor, fontWeight: '700' }}>
-                            Mensual
-                          </ThemedText>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => setChartSelectionMode('recent')}
-                          style={{
-                            paddingHorizontal: 10,
-                            paddingVertical: 7,
-                            borderRadius: 12,
-                            backgroundColor: chartSelectionMode === 'recent' ? tintColor : progressBg,
-                            borderWidth: 1,
-                            borderColor: chartSelectionMode === 'recent' ? tintColor : 'transparent',
-                          }}
-                        >
-                          <ThemedText style={{ fontSize: RFValue(10), color: chartSelectionMode === 'recent' ? '#ffffff' : textColor, fontWeight: '700' }}>
-                            Recientes
-                          </ThemedText>
-                        </TouchableOpacity>
-                      </ScrollView>
-                    </View>
-
-                    <ThemedText style={{ color: iconColor, fontSize: 11, marginTop: 8 }}>
-                      {chartSelectionMode === 'distributed' && 'Distribuidas: toma puntos repartidos dentro del periodo y filtros activos.'}
-                      {chartSelectionMode === 'balancedWeek' && 'Semanal: toma una muestra representativa por semana del periodo y filtros activos.'}
-                      {chartSelectionMode === 'balancedMonth' && 'Mensual: toma una muestra representativa por mes del periodo y filtros activos.'}
-                      {chartSelectionMode === 'recent' && 'Recientes: toma las transacciones más nuevas dentro del periodo y filtros activos.'}
-                    </ThemedText>
-
-                    <View style={{ marginTop: 10 }}>
-                      <ThemedText style={{ color: textColor, fontSize: 12, marginBottom: 6 }}>
-                        Cantidad de transacciones
-                      </ThemedText>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                        {[5, 15, 30, 50, filteredChart.length].filter((v, i, arr) => arr.indexOf(v) === i).map((limit) => (
-                          <TouchableOpacity
-                            key={`fixed-limit-${limit}`}
-                            onPress={() => setChartDataLimit(limit)}
-                            style={{
-                              paddingHorizontal: 12,
-                              paddingVertical: 7,
-                              borderRadius: 12,
-                              backgroundColor: chartDataLimit === limit ? primaryDarkColor : progressBg,
-                              borderWidth: 1,
-                              borderColor: chartDataLimit === limit ? primaryDarkColor : 'transparent',
-                            }}
-                          >
-                            <ThemedText
-                              style={{
-                                fontSize: RFValue(11),
-                                color: chartDataLimit === limit ? '#fff' : textColor,
-                                fontWeight: chartDataLimit === limit ? '700' : '500',
-                              }}
-                            >
-                              {limit === filteredChart.length ? 'Todos' : limit}
-                            </ThemedText>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  </>
-                )}
-              </View>
-            </View>
-          )}
-        </View>
-      </BottomSheetModal>
-
-
-      <Modal visible={showChartOrderModal && Boolean(subscriptionActive)} transparent animationType="fade" onRequestClose={() => setShowChartOrderModal(false)}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <TouchableOpacity
-            activeOpacity={1}
-            onPress={() => setShowChartOrderModal(false)}
-            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.45)' }}
-          />
-
-          <View style={{ width: '88%', maxHeight: '80%', borderRadius: 16, padding: 16, backgroundColor: cardsMain, zIndex: 2, elevation: 6 }}>
-            <ThemedText style={{ fontSize: 18, fontWeight: '700', marginBottom: 4 }}>Personalizar gráficas</ThemedText>
-            <ThemedText style={{ fontSize: 12, color: iconColor, marginBottom: 12 }}>
-              Usa flechas para reordenar y el switch para mostrar u ocultar cada gráfica.
-            </ThemedText>
-
-            <FlatList
-              data={chartCardsConfig}
-              keyExtractor={(item) => item.key}
-              nestedScrollEnabled
-              style={{ flexGrow: 0, maxHeight: 420, marginBottom: 12 }}
-              contentContainerStyle={{ paddingBottom: 4 }}
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item, index }) => (
-                <View
-                  style={{
-                    backgroundColor: `${primaryColor}14`,
-                    borderWidth: 1,
-                    borderColor: `${primaryColor}40`,
-                    borderRadius: 12,
-                    paddingVertical: 10,
-                    paddingHorizontal: 12,
-                    marginBottom: 8,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <ThemedText style={{ fontWeight: '700', fontSize: 13, flex: 1 }}>
-                    {HISTORIAL_CHART_META[item.key].title}
-                  </ThemedText>
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Switch
-                      value={item.visible}
-                      onValueChange={(value) => toggleChartVisibility(item.key, value)}
-                      trackColor={{ false: '#6b7280', true: `${primaryColor}88` }}
-                      thumbColor={item.visible ? primaryColor : '#f3f4f6'}
-                    />
-                    <TouchableOpacity
-                      onPress={() => moveChartUp(index)}
-                      disabled={index === 0}
-                      style={{ padding: 4, opacity: index === 0 ? 0.3 : 1 }}
-                    >
-                      <Ionicons name="arrow-up" size={18} color={textColor} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => moveChartDown(index)}
-                      disabled={index === chartCardsConfig.length - 1}
-                      style={{ padding: 4, opacity: index === chartCardsConfig.length - 1 ? 0.3 : 1 }}
-                    >
-                      <Ionicons name="arrow-down" size={18} color={textColor} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-            />
-
-            <TouchableOpacity
-              onPress={() => setChartCardsConfig(HISTORIAL_CHART_CONFIG_DEFAULT)}
-              style={{ marginTop: 6, marginBottom: 8, paddingVertical: 10, justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: `${primaryColor}50` }}
-            >
-              <ThemedText style={{ fontSize: 12, color: primaryColor, textAlign: 'center' }}>Restablecer orden por defecto</ThemedText>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => setShowChartOrderModal(false)}
-              style={{ backgroundColor: primaryColor, borderRadius: 10, paddingVertical: 10, alignItems: 'center' }}
-            >
-              <ThemedText style={{ color: '#fff', fontWeight: '700' }}>Listo</ThemedText>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
+      </KeyboardAvoidingView>
     </View>
   );
 }

@@ -13,7 +13,7 @@ export const Colors = {
     background2: '#EEF4FA',
     graficaHistorial: '#D9EAFE',
     tint: tintColorLight,
-    icon: '#ffffff',
+    icon: '#475569',
     tabIconDefault: '#94A3B8',
     tabIconSelected: tintColorLight,
     cardMain: '#FFFFFF',

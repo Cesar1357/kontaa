@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, FlatList, Modal, ScrollView, Switch, TouchableOpacity, View } from 'react-native';
+import type { ScrollViewInstance, ViewInstance } from 'react-native';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 
 import { ThemedText } from '@/components/ThemedText';
@@ -151,12 +152,12 @@ export default function AnalisisScreen() {
   const [analysisTourStep, setAnalysisTourStep] = useState(0);
   const [analysisTourTarget, setAnalysisTourTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const analysisTourRefs = {
-    header: useRef<View>(null),
-    periods: useRef<View>(null),
-    summary: useRef<View>(null),
-    charts: useRef<View>(null),
+    header: useRef<ViewInstance>(null),
+    periods: useRef<ViewInstance>(null),
+    summary: useRef<ViewInstance>(null),
+    charts: useRef<ViewInstance>(null),
   };
-  const analysisScrollRef = useRef<ScrollView>(null);
+  const analysisScrollRef = useRef<ScrollViewInstance>(null);
   const analysisLayoutY = useRef<Record<string, number>>({});
   const analysisTourStorageKey = user?.uid ? `konta.analysis-tour.v1.${user.uid}` : null;
 

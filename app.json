@@ -3,7 +3,7 @@
     "name": "Konta",
     "slug": "Konta",
     "version": "5.0.0",
-    "description": "Konta es una app moderna para administrar tus finanzas personales con claridad. Registra ingresos, egresos y ahorros, crea presupuestos y metas, revisa tu progreso en tiempo real y recibe alertas útiles para mantener el control de tu dinero.",
+    "description": "Konta es una app sencilla y visual para organizar tus finanzas personales desde un solo lugar. Registra ingresos, gastos y transferencias, administra cuentas, efectivo, ahorro, intereses y cripto, crea presupuestos y metas, consulta tu patrimonio y analiza tus hábitos para tomar mejores decisiones.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "konta",

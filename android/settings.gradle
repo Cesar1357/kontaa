@@ -65,9 +65,5 @@ project(':react-native-vector-icons').projectDir = file('../node_modules/react-n
 include ':react-native-webview'
 project(':react-native-webview').projectDir = file('../node_modules/react-native-webview/android')
 
-include ':react-native-edge-to-edge'
-project(':react-native-edge-to-edge').projectDir = file('../node_modules/react-native-edge-to-edge/android')
-
-
 include ':app'
 includeBuild(expoAutolinking.reactNativeGradlePlugin)

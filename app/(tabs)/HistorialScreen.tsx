@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Dimensions, KeyboardAvoidingView, Platform, StyleSheet, TextInput, ToastAndroid, TouchableOpacity, View } from "react-native";
+import type { ViewInstance } from "react-native";
 import Animated, { FadeInDown, FadeOutUp, Layout } from "react-native-reanimated";
 import { RFValue } from 'react-native-responsive-fontsize';
 import { db } from '../../config/firebase';
@@ -92,10 +93,10 @@ export default function HistorialScreen() {
   const [historyTourStep, setHistoryTourStep] = useState(0);
   const [historyTourTarget, setHistoryTourTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const historyTourRefs = {
-    summary: React.useRef<View>(null),
-    filters: React.useRef<View>(null),
-    analysis: React.useRef<View>(null),
-    transactions: React.useRef<View>(null),
+    summary: React.useRef<ViewInstance>(null),
+    filters: React.useRef<ViewInstance>(null),
+    analysis: React.useRef<ViewInstance>(null),
+    transactions: React.useRef<ViewInstance>(null),
   };
   const historyScrollRef = React.useRef<any>(null);
   const historyTourStorageKey = userId ? `konta.history-tour.v1.${userId}` : null;

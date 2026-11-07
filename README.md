@@ -1,4 +1,44 @@
-# Welcome to your Expo app 👋
+# Konta
+
+Konta es una app sencilla, visual y completa para organizar tus finanzas personales desde un solo lugar.
+
+## Descripción
+
+Con Konta puedes registrar ingresos, gastos y transferencias, separar tu dinero por cuentas y efectivo, administrar metas de ahorro y cajitas con intereses, consultar activos cripto y visualizar tu patrimonio con claridad.
+
+### Funciones principales
+
+- Registra ingresos, gastos y transferencias en segundos.
+- Administra cuentas bancarias, efectivo y cuentas de ahorro con intereses.
+- Consulta un total consolidado y el detalle de dónde está tu dinero.
+- Crea metas de ahorro, registra depósitos y retiros y sigue tu progreso.
+- Registra activos cripto por unidades o por dinero invertido.
+- Crea presupuestos personalizados y controla tus categorías.
+- Consulta el historial con filtros por periodo, cuenta, categoría, tipo y monto.
+- Analiza ingresos, gastos, ahorro, tendencias y balance financiero.
+- Evita duplicar gastos al mover dinero entre tus propias cuentas.
+- Usa búsqueda global, accesos rápidos, widgets y notificaciones útiles.
+- Explora el Centro de ayuda con preguntas frecuentes y búsqueda.
+- Personaliza tu experiencia con temas claro, oscuro y gris.
+- Protege tu cuenta con autenticación y verificación por correo.
+
+## Notas de versión 5.0.0
+
+- Nuevo sistema de cuentas y patrimonio consolidado.
+- Separación entre efectivo, cuentas bancarias, ahorro con intereses y cripto.
+- Transferencias internas entre cuentas sin duplicar ingresos ni gastos.
+- Historial por cuenta y análisis financiero con exclusión de transferencias internas.
+- Metas de ahorro con depósitos, retiros y movimientos relacionados.
+- Registro de activos cripto por unidades o monto invertido.
+- Categoría Cripto integrada en movimientos y presupuestos.
+- Selectores de cuenta corregidos en ahorro, cripto y compras rápidas.
+- Recorridos guiados para Inicio, Historial, Presupuestos, Ahorros y Análisis.
+- Mejoras visuales y de interacción en Ajustes, Inicio y perfiles.
+- Centro de ayuda con preguntas frecuentes administradas desde Firestore.
+- Búsqueda global con navegación directa a pantallas y resultados.
+- Temas visuales mejorados, incluido el tema gris.
+
+## Desarrollo
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
@@ -24,7 +64,7 @@ rmdir /s /q android\.gradle
 GITHUB
    git pull
    git add .
-   git commit -m "5.0.0"
+   git commit -m "5.0.0 expo 38"
    git push -u origin main
 
    

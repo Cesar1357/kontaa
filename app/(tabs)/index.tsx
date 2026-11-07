@@ -24,6 +24,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import type { ViewInstance } from 'react-native';
 
 import { StatusBar } from 'expo-status-bar';
 import { sendEmailVerification, type User } from 'firebase/auth';
@@ -217,11 +218,11 @@ export default function Inicio() {
   const lastMilestoneRef = useRef<number | null>(null);
   const weeklyTargetSeenRef = useRef(false);
   const tourRefs = {
-    profile: useRef<View>(null),
-    controls: useRef<View>(null),
-    balance: useRef<View>(null),
-    add: useRef<View>(null),
-    sections: useRef<View>(null),
+    profile: useRef<ViewInstance>(null),
+    controls: useRef<ViewInstance>(null),
+    balance: useRef<ViewInstance>(null),
+    add: useRef<ViewInstance>(null),
+    sections: useRef<ViewInstance>(null),
   };
 
   const measureOnboardingTarget = () => {

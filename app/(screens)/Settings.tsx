@@ -31,18 +31,19 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import type { TextInputInstance } from 'react-native';
 import { Icon } from 'react-native-elements';
 import {
   endConnection,
+  fetchProducts,
   finishTransaction,
   getAvailablePurchases,
-  getSubscriptions,
   initConnection,
   purchaseErrorListener,
   purchaseUpdatedListener,
-  requestSubscription,
+  requestPurchase,
   type Purchase,
-  type Subscription,
+  type ProductSubscription,
 } from 'react-native-iap';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, db, functions as firebaseFunctions, storage } from '../../config/firebase';
@@ -86,9 +87,9 @@ export default function Settings() {
   const [customSupportAmount, setCustomSupportAmount] = useState('');
   const [processingSubscription, setProcessingSubscription] = useState(false);
   const [iapReady, setIapReady] = useState(false);
-  const [availableSubscriptions, setAvailableSubscriptions] = useState<Subscription[]>([]);
+  const [availableSubscriptions, setAvailableSubscriptions] = useState<ProductSubscription[]>([]);
   const [syncingPlay, setSyncingPlay] = useState(false);
-  const newNameInputRef = useRef<TextInput>(null);
+  const newNameInputRef = useRef<TextInputInstance>(null);
   const [sendingVerification, setSendingVerification] = useState(false);
   const [suggestionText, setSuggestionText] = useState('');
   const [sendingSuggestion, setSendingSuggestion] = useState(false);
@@ -476,23 +477,21 @@ export default function Settings() {
 
         if (!connected || !isMounted) return;
 
-        const products = (await getSubscriptions({
+        const products = (await fetchProducts({
           skus: supportedSkus,
+          type: 'subs',
         })) || [];
-        const firstProduct = products[0];
-        const details = firstProduct && 'subscriptionOfferDetails' in firstProduct
-          ? firstProduct.subscriptionOfferDetails ?? []
-          : [];
+        const details = products.flatMap((product) => product.subscriptionOffers ?? []);
 
         console.log('Subscription offer details count:', details.length);
         console.log('Subscription offer details raw:', JSON.stringify(details, null, 2));
         console.log(
           'Subscription offer summary:',
-          details.map((offer: any) => ({
-            basePlanId: offer?.basePlanId,
-            offerId: offer?.offerId,
-            offerToken: offer?.offerToken,
-            pricingPhases: offer?.pricingPhases?.pricingPhaseList?.map((phase: any) => ({
+          details.map((offer) => ({
+            basePlanId: offer.basePlanIdAndroid,
+            offerId: offer.id,
+            offerToken: offer.offerTokenAndroid,
+            pricingPhases: offer.pricingPhasesAndroid?.pricingPhaseList?.map((phase) => ({
               formattedPrice: phase?.formattedPrice,
               priceAmountMicros: phase?.priceAmountMicros,
               billingPeriod: phase?.billingPeriod,
@@ -501,7 +500,9 @@ export default function Settings() {
         );
         
         if (isMounted) {
-          setAvailableSubscriptions(Array.isArray(products) ? products as Subscription[] : []);
+          setAvailableSubscriptions(
+            Array.isArray(products) ? products.filter((product) => product.type === 'subs') : []
+          );
           setIapReady(true);
         }
       } catch (error) {
@@ -605,7 +606,7 @@ export default function Settings() {
     setIsUpdating(true);
     try {
       await updateProfile(user!, { displayName: newName });
-      const ref = doc(db, "people", uid);
+      const ref = doc(db, "users", uid);
       await updateDoc(ref, { namep: newName });
       
       ToastAndroid.showWithGravity(
@@ -646,7 +647,7 @@ export default function Settings() {
       await uploadBytes(imageRef, blob, { contentType: result.assets[0].mimeType || 'image/jpeg' });
       const photoURL = await getDownloadURL(imageRef);
       await updateProfile(user, { photoURL });
-      await setDoc(doc(db, `people/${user.uid}`), { photoURL, updatedAt: new Date() }, { merge: true });
+      await setDoc(doc(db, `users/${user.uid}`), { photoURL, updatedAt: new Date() }, { merge: true });
       setProfilePhotoUri(photoURL);
       ToastAndroid.showWithGravity('Foto de perfil actualizada', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
     } catch (error) {
@@ -859,25 +860,25 @@ export default function Settings() {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
-  function getSubscriptionPlans(subscription: Subscription | undefined): SupportPlan[] {
-    if (!subscription || !('subscriptionOfferDetails' in subscription)) return [];
+  function getSubscriptionPlans(subscription: ProductSubscription | undefined): SupportPlan[] {
+    if (!subscription) return [];
 
-    const mappedPlans: SupportPlan[] = (subscription.subscriptionOfferDetails || [])
+    const mappedPlans: SupportPlan[] = (subscription.subscriptionOffers || [])
       .map((offer) => {
-        const pricingPhases = offer?.pricingPhases?.pricingPhaseList || [];
-        const hasTrialPhase = pricingPhases.some((phase: any) => {
-          const priceMicros = Number(phase?.priceAmountMicros ?? 0);
-          const formattedPrice = String(phase?.formattedPrice ?? '').toLowerCase();
+        const pricingPhases = offer.pricingPhasesAndroid?.pricingPhaseList || [];
+        const hasTrialPhase = pricingPhases.some((phase) => {
+          const priceMicros = Number(phase.priceAmountMicros ?? 0);
+          const formattedPrice = String(phase.formattedPrice ?? '').toLowerCase();
           return priceMicros === 0 || formattedPrice.includes('gratis') || formattedPrice.includes('free');
         });
-        const recurringPhase = [...pricingPhases].reverse().find((phase: any) => Number(phase?.priceAmountMicros ?? 0) > 0) || pricingPhases[0] || null;
+        const recurringPhase = [...pricingPhases].reverse().find((phase) => Number(phase.priceAmountMicros ?? 0) > 0) || pricingPhases[0] || null;
         const amount = hasTrialPhase ? 0 : Number(recurringPhase?.priceAmountMicros ?? 0) / 1000000;
 
         return {
           amount,
-          offerToken: offer?.offerToken || null,
-          basePlanId: offer?.basePlanId || null,
-          formattedPrice: hasTrialPhase ? 'Prueba gratis' : recurringPhase?.formattedPrice || null,
+          offerToken: offer.offerTokenAndroid || null,
+          basePlanId: offer.basePlanIdAndroid || null,
+          formattedPrice: hasTrialPhase ? 'Prueba gratis' : recurringPhase?.formattedPrice || offer.displayPrice || null,
           isTrial: hasTrialPhase,
         };
       })
@@ -898,7 +899,7 @@ export default function Settings() {
       });
   }
 
-  const subscriptionProduct = availableSubscriptions.find((item) => item.productId === SUBSCRIPTION_PRODUCT_ID);
+  const subscriptionProduct = availableSubscriptions.find((item) => item.id === SUBSCRIPTION_PRODUCT_ID);
   const availableSupportPlans = useMemo(() => getSubscriptionPlans(subscriptionProduct), [subscriptionProduct]);
   const streakTrialOffer = useMemo(() => {
     if (!availableSupportPlans.length) return null;
@@ -1128,13 +1129,15 @@ export default function Settings() {
             source: 'google_play_billing',
             updatedAt: new Date(),
           },
-          trialOffer: isTrialOfferSelected ? {
-            status: 'claimed',
-            claimedAt: new Date(),
-            offerToken: selectedPlan.offerToken,
-            source: 'streak',
-            streakDays: streakCurrent,
-          } : undefined,
+          ...(isTrialOfferSelected ? {
+            trialOffer: {
+              status: 'claimed',
+              claimedAt: new Date(),
+              offerToken: selectedPlan.offerToken,
+              source: 'streak',
+              streakDays: streakCurrent,
+            },
+          } : {}),
         },
         { merge: true }
       );
@@ -1144,14 +1147,20 @@ export default function Settings() {
         purchaseFailureAlertTimeoutRef.current = null;
       }
 
-      await requestSubscription({
-        subscriptionOffers: [
-          {
-            sku: SUBSCRIPTION_PRODUCT_ID,
-            offerToken: selectedPlan.offerToken,
+      await requestPurchase({
+        type: 'subs',
+        request: {
+          google: {
+            skus: [SUBSCRIPTION_PRODUCT_ID],
+            subscriptionOffers: [
+              {
+                sku: SUBSCRIPTION_PRODUCT_ID,
+                offerToken: selectedPlan.offerToken,
+              },
+            ],
+            obfuscatedAccountId: uid,
           },
-        ],
-        obfuscatedAccountIdAndroid: uid,
+        },
       });
     } catch (error) {
       console.error('Error opening Play subscription:', error);

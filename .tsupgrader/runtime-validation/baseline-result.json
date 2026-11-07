@@ -1,0 +1,69 @@
+{
+  "planHash": "b8da42ca65efe564c9d99cb7c107d5c35846cff05ecc48f44a8228a28ce99020",
+  "phase": "baseline",
+  "recordedAtUtc": "2026-11-07T05:07:57.6696325Z",
+  "retryCount": 0,
+  "resetBaseline": false,
+  "complete": true,
+  "result": {
+    "setupSucceeded": true,
+    "setupDurationMs": 0,
+    "setupFailureOutput": null,
+    "assertions": [
+      {
+        "name": "tsc-no-emit",
+        "kind": "process",
+        "verificationMethod": "exit-code",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "",
+        "durationMs": 5816
+      },
+      {
+        "name": "expo-web-export",
+        "kind": "process",
+        "verificationMethod": "exit-code",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "Starting Metro Bundler\r\n\r\nStatic rendering is enabled. Learn more: https://docs.expo.dev/router/web/static-rendering/\r\n\u03BB Bundled 2400ms node_modules\\@expo\\cli\\node_modules\\@expo\\router-server\\node\\render.js (2882 modules)\r\n[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.\r\nWeb Bundled 2806ms node_modules\\expo-router\\entry.js (2386 modules)\r\nAnimated: \u0060useNativeDriver\u0060 is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add \u0060RCTAnimation\u0060 module to this app, or remove \u0060useNativeDriver\u0060. Make sure to run \u0060bundle exec pod install\u0060 first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md\r\nCalculando gasto para presupuesto: { categoria: \u0027Otros\u0027 }\r\nCalculando gasto para presupuesto: { categoria: \u0027Ahorro\u0027, temporal: true }\r\nCalculando gasto para presupuesto: { categoria: \u0027Otros\u0027 }\r\nCalculando gasto para presupuesto: { categoria: \u0027Ahorro\u0027, temporal: true }\r\n\r\n\u203A web bundles (1):\r\n_expo/static/js/web/entry-e9174eaa99ebced8f169f9aceeef7892.js (5.9MB)\r\n\r\n\u203A Static routes (30):\r\n/ (index) (24KB)\r\n/login (34KB)\r\n/create (35KB)\r\n/_sitemap (23KB)\r\n/Settings (43KB)\r\n/\u002Bnot-found (24KB)\r\n/AppsScreen (43KB)\r\n/(tabs) (69KB)\r\n/AhorrosScreen (39KB)\r\n/AccountsScreen (27KB)\r\n/AnalisisScreen (61KB)\r\n/forgotPassword (32KB)\r\n/(sesion)/login (34KB)\r\n/(sesion)/create (35KB)\r\n/HistorialScreen (45KB)\r\n/HelpCenterScreen (27KB)\r\n/(tabs)/AppsScreen (43KB)\r\n/GlobalSearchScreen (26KB)\r\n/(screens)/Settings (43KB)\r\n/PresupuestosScreen (43KB)\r\n/(tabs)/AhorrosScreen (39KB)\r\n/(tabs)/HistorialScreen (45KB)\r\n/(sesion)/forgotPassword (32KB)\r\n/(screens)/AccountsScreen (27KB)\r\n/(screens)/AnalisisScreen (61KB)\r\n/NotificationCenterScreen (26KB)\r\n/(tabs)/PresupuestosScreen (43KB)\r\n/(screens)/HelpCenterScreen (27KB)\r\n/(screens)/GlobalSearchScreen (26KB)\r\n/(screens)/NotificationCenterScreen (26KB)\r\n\r\nExported: .tsupgrader/runtime-validation/web-export\r\n",
+        "durationMs": 7667
+      }
+    ],
+    "executions": [
+      {
+        "source": "tsc-no-emit",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\npx.CMD",
+        "args": [
+          "tsc",
+          "--noEmit"
+        ],
+        "cwd": "C:\\Users\\cesar\\Proyectos\\kontaa",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      },
+      {
+        "source": "expo-web-export",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\npx.CMD",
+        "args": [
+          "expo",
+          "export",
+          "--platform",
+          "web",
+          "--output-dir",
+          ".tsupgrader/runtime-validation/web-export"
+        ],
+        "cwd": "C:\\Users\\cesar\\Proyectos\\kontaa",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      }
+    ]
+  }
+}

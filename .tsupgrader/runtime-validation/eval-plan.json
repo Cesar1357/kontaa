@@ -1,0 +1,33 @@
+{
+  "projectType": "webapp",
+  "assertions": [
+    {
+      "name": "tsc-no-emit",
+      "kind": "process",
+      "command": "npx",
+      "args": [
+        "tsc",
+        "--noEmit"
+      ],
+      "verificationMethod": "exit-code",
+      "expected": "0",
+      "timeoutSeconds": 180
+    },
+    {
+      "name": "expo-web-export",
+      "kind": "process",
+      "command": "npx",
+      "args": [
+        "expo",
+        "export",
+        "--platform",
+        "web",
+        "--output-dir",
+        ".tsupgrader/runtime-validation/web-export"
+      ],
+      "verificationMethod": "exit-code",
+      "expected": "0",
+      "timeoutSeconds": 300
+    }
+  ]
+}

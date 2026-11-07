@@ -44,6 +44,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import type { TextInputInstance, ViewInstance } from "react-native";
 import { FlatList } from "react-native-gesture-handler";
 import DateTimePickerModal from "react-native-modal-datetime-picker";
 import Animated, { Layout } from "react-native-reanimated";
@@ -187,10 +188,10 @@ export default function AhorrosScreen() {
   const [savingsTourStep, setSavingsTourStep] = useState(0);
   const [savingsTourTarget, setSavingsTourTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const savingsTourRefs = {
-    header: useRef<View>(null),
-    switcher: useRef<View>(null),
-    content: useRef<View>(null),
-    add: useRef<View>(null),
+    header: useRef<ViewInstance>(null),
+    switcher: useRef<ViewInstance>(null),
+    content: useRef<ViewInstance>(null),
+    add: useRef<ViewInstance>(null),
   };
   const savingsScrollRef = useRef<any>(null);
   const savingsTourStorageKey = user?.uid ? `konta.savings-tour.v1.${user.uid}` : null;
@@ -240,10 +241,10 @@ export default function AhorrosScreen() {
 
   const [editando, setEditando] = useState(false);
   const [cantidadActual, setCantidadActual] = useState(0);
-  const nombreInputRef = useRef<TextInput>(null);
-  const metaInputRef = useRef<TextInput>(null);
-  const descripcionInputRef = useRef<TextInput>(null);
-  const movimientoInputRef = useRef<TextInput>(null);
+  const nombreInputRef = useRef<TextInputInstance>(null);
+  const metaInputRef = useRef<TextInputInstance>(null);
+  const descripcionInputRef = useRef<TextInputInstance>(null);
+  const movimientoInputRef = useRef<TextInputInstance>(null);
 
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
   const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background');

@@ -34,6 +34,7 @@ import {
     View,
     StyleSheet,
 } from "react-native";
+import type { ViewInstance } from "react-native";
 import { ScrollView, TextInput } from "react-native-gesture-handler";
 import Animated, { Layout } from "react-native-reanimated";
 import { RFValue } from 'react-native-responsive-fontsize';
@@ -126,11 +127,11 @@ export default function PresupuestosScreen() {
   const [budgetTourStep, setBudgetTourStep] = useState(0);
   const [budgetTourTarget, setBudgetTourTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const budgetTourRefs = {
-    summary: React.useRef<View>(null),
-    sections: React.useRef<View>(null),
-    usage: React.useRef<View>(null),
-    new: React.useRef<View>(null),
-    content: React.useRef<View>(null),
+    summary: React.useRef<ViewInstance>(null),
+    sections: React.useRef<ViewInstance>(null),
+    usage: React.useRef<ViewInstance>(null),
+    new: React.useRef<ViewInstance>(null),
+    content: React.useRef<ViewInstance>(null),
   };
   const budgetScrollRef = React.useRef<any>(null);
   const budgetTourStorageKey = currentUserId ? `konta.budget-tour.v1.${currentUserId}` : null;

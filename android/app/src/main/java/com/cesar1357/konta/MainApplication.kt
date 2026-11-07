@@ -25,7 +25,7 @@ class MainApplication : Application(), ReactApplication {
   }
 
   override val reactNativeHost: ReactNativeHost =
-      object : DefaultReactNativeHost(this) {
+      object : DefaultReactNativeHost(this@MainApplication) {
         override fun getPackages(): List<ReactPackage> {
           return getAppPackages()
         }

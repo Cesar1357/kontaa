@@ -18,6 +18,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import type { TextInputInstance } from "react-native";
 import { RFValue } from "react-native-responsive-fontsize";
 import { useAccounts } from '@/hooks/useAccounts';
 import { DEFAULT_ACCOUNT_ID } from '@/services/accounts';
@@ -62,8 +63,8 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
   const primaryDarkColor = useThemeColor({ light: '', dark: '' }, 'primaryDark');
   const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
 
-  const descripcionRef = useRef<TextInput>(null);
-  const montoRef = useRef<TextInput>(null);
+  const descripcionRef = useRef<TextInputInstance>(null);
+  const montoRef = useRef<TextInputInstance>(null);
   const defaultSuggestions = [
     'Super',
     'Gasolina',
@@ -277,7 +278,6 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
             <MotiView
               from={{ scale: 0.85, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: 'timing', duration: 240 }}
               style={{
                 width: '86%',
                 backgroundColor: backModalColor,

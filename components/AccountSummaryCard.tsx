@@ -13,6 +13,7 @@ import { router } from 'expo-router';
 import Animated, { Layout } from 'react-native-reanimated';
 import { ThemedView } from './ThemedView';
 import { ThemedText } from './ThemedText';
+import type { TextInputInstance } from 'react-native';
 
 type Props = { expanded?: boolean };
 
@@ -48,12 +49,12 @@ export default function AccountSummaryCard({ expanded: initiallyExpanded = false
   const [editAutomaticInterest, setEditAutomaticInterest] = useState(false);
   const [editFavorite, setEditFavorite] = useState(false);
   const [interestAmount, setInterestAmount] = useState('');
-  const nameInputRef = useRef<TextInput>(null);
-  const initialBalanceInputRef = useRef<TextInput>(null);
-  const editNameInputRef = useRef<TextInput>(null);
-  const editInitialBalanceInputRef = useRef<TextInput>(null);
-  const editRateInputRef = useRef<TextInput>(null);
-  const transferAmountRef = useRef<TextInput>(null);
+  const nameInputRef = useRef<TextInputInstance>(null);
+  const initialBalanceInputRef = useRef<TextInputInstance>(null);
+  const editNameInputRef = useRef<TextInputInstance>(null);
+  const editInitialBalanceInputRef = useRef<TextInputInstance>(null);
+  const editRateInputRef = useRef<TextInputInstance>(null);
+  const transferAmountRef = useRef<TextInputInstance>(null);
 
   useEffect(() => {
     if (!createVisible && !editingAccount && !transferVisible) return;

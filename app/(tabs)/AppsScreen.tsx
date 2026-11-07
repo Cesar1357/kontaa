@@ -3,26 +3,27 @@ import { BottomSheetFlatList, BottomSheetModal, BottomSheetScrollView } from '@g
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useFocusEffect } from 'expo-router/react-navigation';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Alert,
-    BackHandler,
-    FlatList,
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  BackHandler,
+  FlatList,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { db } from '../../config/firebase';
+import { DEFAULT_ACCOUNT_ID } from '@/services/accounts';
 
 type ToolType = 'calendar' | 'months' | 'goal' | 'fifty' | 'emergency' | 'debt' | 'leaks';
 
@@ -348,6 +349,7 @@ export default function AppsScreen() {
   const [subscriptionActive, setSubscriptionActive] = useState(false);
   const [showToolOrderModal, setShowToolOrderModal] = useState(false);
   const [toolCardsConfig, setToolCardsConfig] = useState<ToolCardConfig[]>(TOOL_CARDS_CONFIG_DEFAULT);
+  const [savedToolDataLoaded, setSavedToolDataLoaded] = useState(false);
   const [debts, setDebts] = useState<DebtItem[]>([]);
   const [debtName, setDebtName] = useState('');
   const [debtBalance, setDebtBalance] = useState('');
@@ -383,6 +385,63 @@ export default function AppsScreen() {
 
     return () => unsub();
   }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+
+    const loadSavedTools = async () => {
+      try {
+        const [goalSnapshot, ruleSnapshot] = await Promise.all([
+          getDoc(doc(db, `users/${uid}/apps`, 'metaCompra')),
+          getDoc(doc(db, `users/${uid}/apps`, 'regla503020')),
+        ]);
+
+        if (goalSnapshot.exists()) {
+          const data = goalSnapshot.data() || {};
+          setGoalAmount(String(data.goalAmount ?? '35000'));
+          setGoalMonths(String(data.goalMonths ?? '10'));
+          setSavedAmount(String(data.savedAmount ?? '4000'));
+        }
+
+        if (ruleSnapshot.exists()) {
+          const data = ruleSnapshot.data() || {};
+          setMonthlyIncome(String(data.monthlyIncome ?? '18000'));
+        }
+        setSavedToolDataLoaded(true);
+      } catch (error) {
+        console.log('No se pudieron cargar las preferencias de Apps:', error);
+        setSavedToolDataLoaded(true);
+      }
+    };
+
+    loadSavedTools();
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid || !savedToolDataLoaded) return;
+    const timeout = setTimeout(() => {
+      setDoc(doc(db, `users/${uid}/apps`, 'metaCompra'), {
+        goalAmount: parseNumber(goalAmount),
+        goalMonths: Math.max(Math.floor(parseNumber(goalMonths)), 1),
+        savedAmount: parseNumber(savedAmount),
+        updatedAt: new Date(),
+      }, { merge: true }).catch((error) => console.log('No se pudo guardar meta de compra:', error));
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [goalAmount, goalMonths, savedAmount, savedToolDataLoaded, uid]);
+
+  useEffect(() => {
+    if (!uid || !savedToolDataLoaded) return;
+    const timeout = setTimeout(() => {
+      setDoc(doc(db, `users/${uid}/apps`, 'regla503020'), {
+        monthlyIncome: parseNumber(monthlyIncome),
+        updatedAt: new Date(),
+      }, { merge: true }).catch((error) => console.log('No se pudo guardar regla 50/30/20:', error));
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [monthlyIncome, savedToolDataLoaded, uid]);
 
   useEffect(() => {
     if (!uid) {
@@ -1178,6 +1237,7 @@ export default function AppsScreen() {
       monto: Number(monthlyPayment.toFixed(2)),
       frecuencia: 'Mensual',
       diaPago: day,
+      cuentaId: DEFAULT_ACCOUNT_ID,
       activo: true,
       lastUpdate: new Date(),
       updatedAt: new Date(),
@@ -1328,6 +1388,7 @@ export default function AppsScreen() {
         descripcion: `Pago a meses ${purchase.nombre}`,
         monto: montoPago,
         tipo: 'egreso',
+        cuentaId: DEFAULT_ACCOUNT_ID,
         fecha: new Date(),
         presupuestoCategoria: 'Compras a meses',
         recurrenteId: purchase.recurrenteGastoId || null,

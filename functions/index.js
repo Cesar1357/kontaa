@@ -211,18 +211,20 @@ function hashNotificationPart(value) {
 
 function getNotificationDedupeKey(title, data = {}) {
   const now = new Date();
-  const cooldownMs = getNotificationCooldownMs(data);
-  if (cooldownMs >= 7 * 24 * 60 * 60 * 1000) {
-    now.setDate(now.getDate() - now.getDay());
-  }
-  const dateKey = now.toISOString().slice(0, 10);
+  const isMonthlyAlert = ['presupuesto', 'transacciones', 'ahorros'].includes(data.type);
+  const dateKey = isMonthlyAlert
+    ? now.toISOString().slice(0, 7)
+    : now.toISOString().slice(0, 10);
   const threshold = Number(data.porcentaje || 0) >= 100 ? '100' : Number(data.porcentaje || 0) >= 80 ? '80' : 'event';
   const scope = data.ahorroId || data.categoria || data.periodo || 'general';
-  return `${data.type || title}:${scope}:${threshold}:${dateKey}`;
+  const titleKey = data.type === 'presupuesto'
+    ? 'presupuesto'
+    : String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+  return `${data.type || title}:${titleKey}:${scope}:${threshold}:${dateKey}`;
 }
 
 function getNotificationCooldownMs(data = {}) {
-  if (data.type === 'ahorros' && data.ahorroId) return 7 * 24 * 60 * 60 * 1000;
+  if (['ahorros', 'transacciones', 'presupuesto'].includes(data.type)) return 30 * 24 * 60 * 60 * 1000;
   return 24 * 60 * 60 * 1000;
 }
 
@@ -247,6 +249,7 @@ async function reserveNotificationSlot(pushToken, title, data = {}) {
       type: data.type || title,
       status: 'sending',
       lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
     return true;
@@ -351,7 +354,7 @@ async function sendPushNotification(pushTokens, title, body, data = {}) {
 exports.notifyAhorrosSinMovimientos = functions.scheduler
   .onSchedule(
     {
-      schedule: '0 10 * * *',
+      schedule: '0 10 * * 1',
       timeZone: 'America/Mexico_City',
     },
     async (context) => {
@@ -421,7 +424,7 @@ exports.notifyAhorrosSinMovimientos = functions.scheduler
 exports.notifyTransaccionesSinMovimiento = functions.scheduler
   .onSchedule(
     {
-      schedule: '30 10 * * *',
+      schedule: '30 10 * * 1',
       timeZone: 'America/Mexico_City',
     },
     async (context) => {

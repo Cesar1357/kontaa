@@ -1,8 +1,8 @@
 import { Colors } from '@/constants/Colors';
 import { ThemeProvider, useAppTheme } from '@/hooks/ThemeContext';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from "expo-router/react-navigation";
 import { Stack } from 'expo-router';
+import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from "expo-router/react-navigation";
 import { StatusBar } from 'expo-status-bar';
 import * as Updates from 'expo-updates';
 import { useEffect } from 'react';
@@ -59,6 +59,14 @@ function AppShell() {
                 contentStyle: { backgroundColor: 'transparent' },
               }}/>
               <Stack.Screen name="(screens)/Settings" options={{
+                animation: 'slide_from_left',
+                contentStyle: { backgroundColor: 'transparent' },
+              }} />
+              <Stack.Screen name="(screens)/AccountsScreen" options={{
+                animation: 'slide_from_right',
+                contentStyle: { backgroundColor: 'transparent' },
+              }} />
+              <Stack.Screen name="(screens)/HelpCenterScreen" options={{
                 animation: 'slide_from_right',
                 contentStyle: { backgroundColor: 'transparent' },
               }} />

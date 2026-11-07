@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
+import { useAccounts } from '@/hooks/useAccounts';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, onSnapshot } from 'firebase/firestore';
@@ -14,6 +15,7 @@ type RecurrentItem = {
   monto: number;
   diaPago: number;
   tipo: 'ingreso' | 'egreso';
+  cuentaId?: string | null;
   nextDate: Date;
   daysLeft: number;
 };
@@ -28,6 +30,7 @@ const nextPaymentDate = (day: number) => {
 
 export default function ProximosRecurrentesCard() {
   const { user } = useAuth();
+  const accounts = useAccounts(user?.uid);
   const cardsMain = useThemeColor({ light: '', dark: '' }, 'cardsMain');
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
 
@@ -57,6 +60,7 @@ export default function ProximosRecurrentesCard() {
             id: item.id,
             nombre: item.nombre || 'Recurrente',
             monto: Number(item.monto || 0),
+            cuentaId: item.cuentaId || null,
             diaPago: Number(item.diaPago || 1),
             tipo: item.tipo,
             nextDate,
@@ -120,6 +124,7 @@ export default function ProximosRecurrentesCard() {
           <View key={item.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
             <ThemedText style={{ fontSize: 12, opacity: 0.88 }}>
               {item.tipo === 'egreso' ? 'Gasto' : 'Ingreso'} • {item.nombre}
+              {item.cuentaId ? ` • ${accounts.find((account) => account.id === item.cuentaId)?.nombre || 'Cuenta'}` : ''}
             </ThemedText>
             <ThemedText style={{ fontSize: 12, fontWeight: '700' }}>
               ${item.monto.toFixed(0)} · {item.daysLeft}d

@@ -19,6 +19,8 @@ import {
   View,
 } from "react-native";
 import { RFValue } from "react-native-responsive-fontsize";
+import { useAccounts } from '@/hooks/useAccounts';
+import { DEFAULT_ACCOUNT_ID } from '@/services/accounts';
 
 interface Props {
   visible: boolean;
@@ -34,6 +36,7 @@ interface Props {
     preestablecidoSubId?: string;
     preestablecidoSubNombre?: string;
     presupuestoCategoria?: string | null;
+    cuentaId?: string;
   } | null;
 }
 
@@ -49,6 +52,8 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
   const [descripcionSugerida, setDescripcionSugerida] = useState<string[]>([]);
   const [historialTransacciones, setHistorialTransacciones] = useState<any[]>([]);
   const [sugerenciaSeleccionada, setSugerenciaSeleccionada] = useState<string | null>(null);
+  const accounts = useAccounts(userId);
+  const [accountId, setAccountId] = useState(DEFAULT_ACCOUNT_ID);
 
   const backModalColor = useThemeColor({ light: '', dark: '' }, 'transaccionModal');
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
@@ -146,9 +151,10 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
 
   useEffect(() => {
     if (visible) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         descripcionRef.current?.focus();
       }, 300);
+      return () => clearTimeout(timer);
     }
   }, [visible]);
 
@@ -161,6 +167,11 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
     setPreestablecidoMainSeleccionado(initialData.preestablecidoMainId || null);
     setSugerenciaSeleccionada(null);
   }, [visible, initialData]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setAccountId(initialData?.cuentaId || accounts[0]?.id || DEFAULT_ACCOUNT_ID);
+  }, [accounts, initialData?.cuentaId, visible]);
 
   useEffect(() => {
     if (!visible || !initialData?.presupuestoCategoria || presupuestos.length === 0) return;
@@ -226,6 +237,7 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
         descripcion,
         monto: parseFloat(monto),
         tipo,
+        cuentaId: accountId,
         fecha: new Date(),
         presupuestoCategoria: presupuestos.find(p => p.id === presupuestoSeleccionado)?.categoria || null,
         preestablecidoMainId: mainSeleccionado?.id || initialData?.preestablecidoMainId || null,
@@ -401,6 +413,30 @@ export default function NuevaTransaccionModal({ visible, onClose, userId, onSave
                   </Text>
                 </TouchableOpacity>
               </View>
+
+              {accounts.length > 0 && (
+                <View style={{ marginBottom: 10 }}>
+                  <Text style={{ color: "#ccc", marginBottom: 6, fontWeight: "500" }}>
+                    Cuenta:
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {accounts.filter((account) => account.activo !== false && account.tipo !== 'ahorro_interes').map((account) => (
+                      <TouchableOpacity
+                        key={account.id}
+                        onPress={() => setAccountId(account.id)}
+                        style={[
+                          styles.presupuestoBtn,
+                          {
+                            backgroundColor: accountId === account.id ? "#6366f1" : textColor === "#0F172A" ? "#e2e8f0" : cardsMain,
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: textColor }}>{account.nombre}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
 
               {/* 🔹 Selector de presupuesto personalizado */}
               {presupuestos.length > 0 && tipo === "egreso" && (

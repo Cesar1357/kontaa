@@ -8,6 +8,7 @@ import { actualizarPreciosUsuario, fetchMarkets, normalizeCoinId } from '@/servi
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams } from "expo-router";
 import {
   addDoc,
   collection,
@@ -28,10 +29,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -45,6 +48,8 @@ import { FlatList } from "react-native-gesture-handler";
 import DateTimePickerModal from "react-native-modal-datetime-picker";
 import Animated, { Layout } from "react-native-reanimated";
 import { RFValue } from "react-native-responsive-fontsize";
+import { DEFAULT_ACCOUNT_ID } from '@/services/accounts';
+import { useAccounts } from '@/hooks/useAccounts';
 /**
  * AhorrosScreen
  * - Lista de metas de ahorro (cards)
@@ -57,7 +62,11 @@ import { RFValue } from "react-native-responsive-fontsize";
  */
 
 export default function AhorrosScreen() {
+  const params = useLocalSearchParams<{ view?: string }>();
   const { user } = useAuth();
+  const accounts = useAccounts((user as any)?.uid);
+  const spendableAccounts = accounts.filter((account) => account.activo !== false && account.tipo !== "ahorro_interes");
+  const favoriteAccountId = spendableAccounts.find((account) => account.esFavorita)?.id || spendableAccounts[0]?.id || DEFAULT_ACCOUNT_ID;
   type PlazoAhorro = "corto" | "mediano" | "largo";
   const PLAZO_DIAS: Record<PlazoAhorro, number> = {
     corto: 30,
@@ -73,6 +82,11 @@ export default function AhorrosScreen() {
     cryptoListViewMode,
     setCryptoListViewMode,
   } = useAppTheme();
+  useEffect(() => {
+    if (params.view === 'ahorros' || params.view === 'cripto') {
+      setSavingsViewMode(params.view);
+    }
+  }, [params.view, setSavingsViewMode]);
   const [displayCurrency, setDisplayCurrency] = useState<"MXN" | "USD">("MXN");
   const [cryptoHoldings, setCryptoHoldings] = useState<any[]>([]);
   const [showCryptoForm, setShowCryptoForm] = useState(false);
@@ -83,10 +97,17 @@ export default function AhorrosScreen() {
   const [cryptoSearchResults, setCryptoSearchResults] = useState<any[]>([]);
   const [cryptoCantidad, setCryptoCantidad] = useState("");
   const [cryptoPrecioCompra, setCryptoPrecioCompra] = useState("");
+  const [cryptoInputType, setCryptoInputType] = useState<"quantity" | "money">("quantity");
   const [cryptoCoinId, setCryptoCoinId] = useState("");
   const [cryptoFechaCompra, setCryptoFechaCompra] = useState<Date>(new Date());
   const [isCryptoDatePickerVisible, setCryptoDatePickerVisible] = useState(false);
   const [cryptoLedger, setCryptoLedger] = useState<'local' | 'global'>('local');
+  const [cryptoAccountId, setCryptoAccountId] = useState(DEFAULT_ACCOUNT_ID);
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    const activeAccount = accounts.find((account) => account.id === cryptoAccountId && account.activo !== false);
+    if (!activeAccount) setCryptoAccountId(favoriteAccountId);
+  }, [accounts, cryptoAccountId, favoriteAccountId]);
   const cryptoActionLock = useRef(false);
   const [savingCryptoAction, setSavingCryptoAction] = useState(false);
   const [cryptoSearchFilter, setCryptoSearchFilter] = useState("");
@@ -99,6 +120,7 @@ export default function AhorrosScreen() {
     inputType: 'money' | 'crypto';
     amount: string;
     ledger: 'local' | 'global';
+    accountId: string;
     balance: {
       cash: number;
       crypto: number;
@@ -110,6 +132,7 @@ export default function AhorrosScreen() {
     inputType: 'money',
     amount: '',
     ledger: 'global',
+    accountId: DEFAULT_ACCOUNT_ID,
     balance: { cash: 0, crypto: 0 },
   });
 
@@ -160,14 +183,66 @@ export default function AhorrosScreen() {
   const [historyType, setHistoryType] = useState<'saving' | 'crypto'>('saving');
   const [transaccionesData, setTransaccionesData] = useState<any[]>([]);
   const [cargandoMovimientos, setCargandoMovimientos] = useState(false);
+  const [showSavingsTour, setShowSavingsTour] = useState(false);
+  const [savingsTourStep, setSavingsTourStep] = useState(0);
+  const [savingsTourTarget, setSavingsTourTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const savingsTourRefs = {
+    header: useRef<View>(null),
+    switcher: useRef<View>(null),
+    content: useRef<View>(null),
+    add: useRef<View>(null),
+  };
+  const savingsScrollRef = useRef<any>(null);
+  const savingsTourStorageKey = user?.uid ? `konta.savings-tour.v1.${user.uid}` : null;
+  const SAVINGS_TOUR_STEPS = [
+    { target: 'header', icon: 'wallet-outline' as const, title: 'Ahorros y Cripto', description: 'Administra tus metas de ahorro y tu portafolio cripto desde una sola pantalla.' },
+    { target: 'switcher', icon: 'swap-horizontal-outline' as const, title: 'Cambia de sección', description: 'Usa estos botones para alternar entre tus metas de ahorro y tus activos cripto.' },
+    { target: 'content', icon: 'trending-up-outline' as const, title: 'Consulta tu progreso', description: 'Revisa saldos, avances, rendimiento y movimientos de cada meta o activo.' },
+    { target: 'add', icon: 'add-circle-outline' as const, title: 'Agrega una meta', description: 'En Ahorro, usa este botón para crear una nueva meta y definir su objetivo.' },
+  ];
+  useEffect(() => {
+    if (!savingsTourStorageKey) return;
+    AsyncStorage.getItem(savingsTourStorageKey).then((seen) => {
+      setShowSavingsTour(seen !== 'true');
+    }).catch((error) => console.error('No se pudo cargar el recorrido de Ahorros:', error));
+  }, [savingsTourStorageKey]);
+
+  const finishSavingsTour = async () => {
+    if (savingsTourStorageKey) {
+      await AsyncStorage.setItem(savingsTourStorageKey, 'true');
+    }
+    setShowSavingsTour(false);
+    setSavingsTourStep(0);
+  };
+  const measureSavingsTourTarget = () => {
+    const target = SAVINGS_TOUR_STEPS[savingsTourStep]?.target as keyof typeof savingsTourRefs | undefined;
+    const node = target ? savingsTourRefs[target].current : null;
+    if (!node) {
+      setSavingsTourTarget(null);
+      return;
+    }
+    node.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) setSavingsTourTarget({ x, y, width, height });
+    });
+  };
+  useEffect(() => {
+    if (!showSavingsTour) return;
+    const target = SAVINGS_TOUR_STEPS[savingsTourStep]?.target;
+    if (target === 'content') savingsScrollRef.current?.scrollTo?.({ y: 460, animated: true });
+    const timer = setTimeout(measureSavingsTourTarget, target === 'content' ? 500 : 180);
+    return () => clearTimeout(timer);
+  }, [savingsTourStep, showSavingsTour, viewMode]);
 
   const [selected, setSelected] = useState<any>(null); // ahorro seleccionado
   const [movimientoMonto, setMovimientoMonto] = useState("");
   const [movimientoTipo, setMovimientoTipo] = useState<"deposito" | "retiro" | "transferencia" | "pasarATransacciones">("deposito");
+  const [cuentaMovimientoId, setCuentaMovimientoId] = useState(DEFAULT_ACCOUNT_ID);
 
   const [editando, setEditando] = useState(false);
   const [cantidadActual, setCantidadActual] = useState(0);
   const nombreInputRef = useRef<TextInput>(null);
+  const metaInputRef = useRef<TextInput>(null);
+  const descripcionInputRef = useRef<TextInput>(null);
   const movimientoInputRef = useRef<TextInput>(null);
 
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
@@ -474,6 +549,7 @@ export default function AhorrosScreen() {
     setCryptoSearchResults([]);
     setCryptoCantidad("");
     setCryptoPrecioCompra("");
+    setCryptoInputType("quantity");
     setCryptoFechaCompra(new Date());
     setCryptoLedger('local');
     setEditingHoldingId(null);
@@ -535,7 +611,7 @@ export default function AhorrosScreen() {
     const userId = (user as any)?.uid;
     const symbol = cryptoSymbol.trim().toUpperCase();
     const name = cryptoName.trim() || symbol || "Activo";
-    const quantity = parseNumericInput(cryptoCantidad);
+    const enteredValue = parseNumericInput(cryptoCantidad);
     const resolvedCoinId = cryptoCoinId || CRYPTO_ID_MAP[cryptoSymbol] || cryptoSymbol.toLowerCase();
     const marketPrice = await fetchCurrentCryptoPrice(resolvedCoinId);
     const avgCost = parseNumericInput(cryptoPrecioCompra);
@@ -546,8 +622,8 @@ export default function AhorrosScreen() {
       return;
     }
 
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      Alert.alert("Error", "La cantidad debe ser mayor a 0.");
+    if (!Number.isFinite(enteredValue) || enteredValue <= 0) {
+      Alert.alert("Error", cryptoInputType === "money" ? "El monto debe ser mayor a 0." : "La cantidad debe ser mayor a 0.");
       return;
     }
 
@@ -556,6 +632,8 @@ export default function AhorrosScreen() {
       return;
     }
 
+    const quantity = cryptoInputType === "money" ? enteredValue / safeAvgCost : enteredValue;
+    const purchaseAmount = quantity * safeAvgCost;
     const priceForRecord = Number.isFinite(marketPrice) && marketPrice > 0 ? marketPrice : safeAvgCost;
     const now = Timestamp.now();
     const purchaseDate = Timestamp.fromDate(cryptoFechaCompra);
@@ -569,6 +647,7 @@ export default function AhorrosScreen() {
       currentPrice: priceForRecord,
       icon: cryptoIcon || null,
       coinId: resolvedCoinId,
+      cuentaId: cryptoAccountId,
       createdAt: purchaseDate,
       updatedAt: now,
     };
@@ -587,9 +666,10 @@ export default function AhorrosScreen() {
       if (transactionId) {
         await setDoc(doc(db, `users/${userId}/transacciones`, transactionId), {
           tipo: 'egreso',
-          monto: Number(nextItem.quantity) * Number(nextItem.currentPrice || 0),
+          monto: purchaseAmount,
           descripcion: `Compra inicial de ${nextItem.name} (${nextItem.symbol})`,
-          categoria: 'crypto',
+          categoria: 'Cripto',
+          presupuestoCategoria: 'Cripto',
           fecha: purchaseDate,
           createdAt: now,
           crypto: {
@@ -600,6 +680,7 @@ export default function AhorrosScreen() {
           },
           origen: 'movimiento-cripto',
           cryptoLedger: 'global',
+          cuentaId: cryptoAccountId,
         });
       }
 
@@ -616,6 +697,7 @@ export default function AhorrosScreen() {
             createdAt: now,
             originTransactionId: transactionId,
             ledger: cryptoLedger,
+            cuentaId: cryptoAccountId,
           });
         }
       } catch (e) {
@@ -680,7 +762,9 @@ export default function AhorrosScreen() {
     setCryptoName(holding.name);
     setCryptoIcon(holding.icon || null);
     setCryptoCoinId(holding.coinId || "");
+    setCryptoAccountId(holding.cuentaId || favoriteAccountId);
     setCryptoCantidad(String(holding.quantity ?? ""));
+    setCryptoInputType("quantity");
     setCryptoPrecioCompra(String(holding.avgCost ?? ""));
     setCryptoFechaCompra(holding.createdAt?.seconds ? new Date(holding.createdAt.seconds * 1000) : new Date());
     setShowCryptoForm(true);
@@ -710,6 +794,7 @@ export default function AhorrosScreen() {
       inputType: 'money',
       amount: '',
       ledger: 'global',
+      accountId: favoriteAccountId,
       balance: {
         cash: cashBalance,
         crypto: Number(holding.quantity ?? 0),
@@ -779,7 +864,8 @@ export default function AhorrosScreen() {
         tipo: quickTrade.mode === 'buy' ? 'egreso' : 'ingreso',
         monto: moneyAmount,
         descripcion: `${quickTrade.mode === 'buy' ? 'Compra rápida' : 'Venta rápida'} ${currentHolding.symbol}`,
-        categoria: 'crypto',
+        categoria: 'Cripto',
+        presupuestoCategoria: 'Cripto',
         fecha: Timestamp.now(),
         createdAt: Timestamp.now(),
         crypto: {
@@ -790,6 +876,7 @@ export default function AhorrosScreen() {
         },
         origen: 'movimiento-cripto',
         cryptoLedger: 'global',
+        cuentaId: quickTrade.accountId,
       });
     }
 
@@ -806,6 +893,7 @@ export default function AhorrosScreen() {
         originTransactionId: transactionId,
         ledger: quickTrade.ledger,
         cryptoLedger: quickTrade.ledger,
+        cuentaId: quickTrade.accountId,
       });
     } catch (e) {
       console.warn('No se pudo registrar movimiento rapido en subcollection movimientos:', e);
@@ -818,6 +906,7 @@ export default function AhorrosScreen() {
       inputType: 'money',
       amount: '',
       ledger: 'global',
+      accountId: favoriteAccountId,
       balance: { cash: 0, crypto: 0 },
     });
     ToastAndroid.show(quickTrade.mode === 'buy' ? 'Compra rápida registrada' : 'Venta rápida registrada', ToastAndroid.SHORT);
@@ -1028,23 +1117,20 @@ export default function AhorrosScreen() {
     return () => clearTimeout(timer);
   }, [showNuevo, editando]);
 
+  useEffect(() => {
+    if (!showDetalle) return;
+    const timer = setTimeout(() => movimientoInputRef.current?.focus(), 250);
+    return () => clearTimeout(timer);
+  }, [showDetalle]);
+
   // Abrir detalle
   const abrirDetalle = (a: any) => {
     setSelected(a);
+    setCuentaMovimientoId(spendableAccounts[0]?.id || DEFAULT_ACCOUNT_ID);
     setMovimientoMonto("");
     setMovimientoTipo("deposito");
     setShowDetalle(true);
   };
-
-  useEffect(() => {
-    if (!showDetalle) return;
-
-    const timer = setTimeout(() => {
-      movimientoInputRef.current?.focus();
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [showDetalle]);
 
   const abrirTransacciones = async (a: any) => {
     const userId = (user as any)?.uid;
@@ -1216,10 +1302,12 @@ export default function AhorrosScreen() {
           tx.set(transactionRef!, {
             descripcion: `Transferencia a ahorro: ${selected.nombre}`,
             monto: montoNum,
-            tipo: "egreso",
+            tipo: "transferencia",
             fecha: serverTimestamp(),
             creadoAutomaticamente: false,
             origen: "transferencia-ahorro",
+            tipoMovimiento: "transferencia_interna",
+            cuentaOrigenId: cuentaMovimientoId,
             ahorroId: selected.id,
             ahorroNombre: selected.nombre,
           });
@@ -1229,10 +1317,12 @@ export default function AhorrosScreen() {
           tx.set(transactionRef!, {
             descripcion: `Retiro de ahorro: ${selected.nombre}`,
             monto: montoNum,
-            tipo: "ingreso",
+            tipo: "transferencia",
             fecha: serverTimestamp(),
             creadoAutomaticamente: false,
             origen: "retiro-ahorro",
+            tipoMovimiento: "transferencia_interna",
+            cuentaDestinoId: cuentaMovimientoId,
             ahorroId: selected.id,
             ahorroNombre: selected.nombre,
           });
@@ -1370,10 +1460,57 @@ export default function AhorrosScreen() {
   };
 
   // UI
+  const savingsTourWindowHeight = Dimensions.get('window').height;
+  const savingsTourCardTop = savingsTourTarget
+    ? savingsTourTarget.y > savingsTourWindowHeight * 0.48
+      ? 24
+      : Math.min(savingsTourTarget.y + savingsTourTarget.height + 16, savingsTourWindowHeight - 360)
+    : 180;
   return (
     <View style={{ flex: 1, backgroundColor: backgroundColor2 }}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 80 }}>
-        <Animated.View layout={Layout.springify()}>
+      {showSavingsTour && (
+        <View style={{ ...StyleSheet.absoluteFill, zIndex: 50 }} pointerEvents="box-none">
+          {savingsTourTarget ? (
+            <>
+              <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: Math.max(0, savingsTourTarget.y - 8), backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: savingsTourTarget.y - 8, left: 0, width: Math.max(0, savingsTourTarget.x - 8), height: savingsTourTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: savingsTourTarget.y - 8, right: 0, width: Math.max(0, Dimensions.get('window').width - savingsTourTarget.x - savingsTourTarget.width - 8), height: savingsTourTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: savingsTourTarget.y + savingsTourTarget.height + 8, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: savingsTourTarget.y - 8, left: savingsTourTarget.x - 8, width: savingsTourTarget.width + 16, height: savingsTourTarget.height + 16, borderRadius: 16, borderWidth: 2, borderColor: primaryColor, shadowColor: primaryColor, shadowOpacity: 0.9, shadowRadius: 12, elevation: 12 }} />
+            </>
+          ) : (
+            <View pointerEvents="none" style={{ ...StyleSheet.absoluteFill, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+          )}
+          <View pointerEvents="box-none" style={{ position: 'absolute', top: savingsTourCardTop, left: 16, right: 16 }}>
+            <View style={{ backgroundColor: backgroundColor, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: `${primaryColor}35`, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <ThemedText style={{ fontSize: 12, opacity: 0.8 }}>Recorrido de Ahorros</ThemedText>
+                <TouchableOpacity onPress={finishSavingsTour} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+                  <ThemedText style={{ fontSize: 12, fontWeight: '700', color: '#94a3b8' }}>Omitir</ThemedText>
+                </TouchableOpacity>
+              </View>
+              <View style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginTop: 10, marginBottom: 10, backgroundColor: `${primaryColor}20`, borderWidth: 1, borderColor: `${primaryColor}55` }}>
+                <Ionicons name={SAVINGS_TOUR_STEPS[savingsTourStep].icon} size={28} color={primaryColor} />
+              </View>
+              <ThemedText style={{ fontSize: 20, fontWeight: '800', marginBottom: 8 }}>{SAVINGS_TOUR_STEPS[savingsTourStep].title}</ThemedText>
+              <ThemedText style={{ fontSize: 13, opacity: 0.86, lineHeight: 20 }}>{SAVINGS_TOUR_STEPS[savingsTourStep].description}</ThemedText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, marginBottom: 14 }}>
+                {SAVINGS_TOUR_STEPS.map((_, index) => <View key={`savings-dot-${index}`} style={{ width: savingsTourStep === index ? 20 : 8, height: 8, borderRadius: 99, marginRight: 6, backgroundColor: savingsTourStep === index ? primaryColor : `${primaryColor}35` }} />)}
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <TouchableOpacity disabled={savingsTourStep === 0} onPress={() => setSavingsTourStep((step) => Math.max(0, step - 1))} style={{ borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: `${primaryColor}45`, opacity: savingsTourStep === 0 ? 0.4 : 1 }}>
+                  <ThemedText style={{ fontWeight: '700', fontSize: 12 }}>Atrás</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => savingsTourStep >= SAVINGS_TOUR_STEPS.length - 1 ? finishSavingsTour() : setSavingsTourStep((step) => step + 1)} style={{ borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: primaryColor }}>
+                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{savingsTourStep >= SAVINGS_TOUR_STEPS.length - 1 ? 'Listo' : 'Siguiente'}</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
+      <ScrollView ref={savingsScrollRef} contentContainerStyle={{ padding: 16, paddingTop: 80 }}>
+        <Animated.View layout={Layout.springify()} ref={savingsTourRefs.header} collapsable={false}>
           <LinearGradient
             colors={headerColors}
             start={{ x: 0, y: 0 }}
@@ -1408,6 +1545,8 @@ export default function AhorrosScreen() {
         <View style={{ height: 18 }} />
 
         <View
+          ref={savingsTourRefs.switcher}
+          collapsable={false}
           style={{
             flexDirection: "row",
             backgroundColor: cardsMain,
@@ -1446,6 +1585,7 @@ export default function AhorrosScreen() {
           })}
         </View>
 
+        <View ref={savingsTourRefs.content} collapsable={false}>
 {viewMode === "cripto" ? (
           <View
             style={{
@@ -1501,9 +1641,11 @@ export default function AhorrosScreen() {
                     <Text style={{ color: iconColor, fontWeight: "700" }}>Actualizar</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
+                    ref={savingsTourRefs.add}
                     onPress={() => {
                       setEditingHoldingId(null);
                       setCryptoFechaCompra(new Date());
+                      setCryptoAccountId(favoriteAccountId);
                       setShowCryptoForm(true);
                     }}
                     style={{ backgroundColor: primaryColor, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 }}
@@ -1756,18 +1898,17 @@ export default function AhorrosScreen() {
             )}
           </Animated.View>
         )}
+        </View>
 
         <View style={{ height: 80 }} />
       </ScrollView>
 
       {/* Botón flotante crear */}
       {viewMode === "ahorros" ? (
-        <TouchableOpacity
-          onPress={abrirNuevo}
-          style={{
-            position: "absolute",
-            bottom: 30,
-            right: 20,
+        <View ref={savingsTourRefs.add} collapsable={false} style={{ position: "absolute", bottom: 30, right: 20, width: 56, height: 56 }}>
+          <TouchableOpacity
+            onPress={abrirNuevo}
+            style={{
             backgroundColor: primaryColor,
             width: 56,
             height: 56,
@@ -1776,15 +1917,21 @@ export default function AhorrosScreen() {
             alignItems: "center",
             elevation: 8,
           }}
-        >
-          <Ionicons name="add" size={30} color={iconColor} />
-        </TouchableOpacity>
+          >
+            <Ionicons name="add" size={30} color={iconColor} />
+          </TouchableOpacity>
+        </View>
       ) : null}
 
       <Modal visible={showCryptoForm} transparent animationType="fade">
         
-        <TouchableWithoutFeedback onPress={resetCryptoForm}>
-          <View style={styles.modalBack}>
+        <View style={styles.modalBack}>
+          <TouchableOpacity
+            onPress={resetCryptoForm}
+            activeOpacity={1}
+            style={StyleSheet.absoluteFill}
+            accessibilityLabel="Cerrar formulario de cripto"
+          />
             <KeyboardAvoidingView
               behavior={Platform.OS === "ios" ? "padding" : undefined}
             >
@@ -1793,7 +1940,7 @@ export default function AhorrosScreen() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ justifyContent: "center", paddingVertical: 20 }}
               >
-                <View style={styles.modalCard}>
+                <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
                   <ThemedText style={{ fontSize: 22, fontWeight: "800", marginBottom: 4 }}>
                     {editingHoldingId ? "Editar activo" : "Nuevo activo"}
                   </ThemedText>
@@ -1897,8 +2044,33 @@ export default function AhorrosScreen() {
                     POSICIÓN
                   </Text>
 
+                  <Text style={{ color: textColor, opacity: 0.72, fontWeight: "700", fontSize: 12, marginBottom: 8 }}>
+                    REGISTRAR POSICIÓN POR
+                  </Text>
+                  <View style={{ flexDirection: "row", marginBottom: 12 }}>
+                    {(["quantity", "money"] as const).map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        onPress={() => setCryptoInputType(option)}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 10,
+                          borderRadius: 10,
+                          marginRight: option === "quantity" ? 8 : 0,
+                          backgroundColor: cryptoInputType === option ? primaryColor : cardsMain,
+                          borderWidth: 1,
+                          borderColor: primaryColor,
+                        }}
+                      >
+                        <Text style={{ color: cryptoInputType === option ? "white" : iconColor, textAlign: "center", fontWeight: "700" }}>
+                          {option === "quantity" ? "En unidades" : "En dinero"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
                   <TextInput
-                    placeholder="Cantidad de unidades"
+                    placeholder={cryptoInputType === "money" ? "Monto de compra en MXN" : "Cantidad de unidades"}
                     placeholderTextColor={textColor}
                     keyboardType="decimal-pad"
                     value={cryptoCantidad}
@@ -1948,6 +2120,31 @@ export default function AhorrosScreen() {
                       </TouchableOpacity>
                     ))}
                   </View>
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: textColor, opacity: 0.72, fontWeight: "700", fontSize: 12, marginBottom: 8 }}>
+                      CUENTA VINCULADA
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {spendableAccounts.map((account) => (
+                        <Pressable
+                          key={account.id}
+                          onPress={() => setCryptoAccountId(account.id)}
+                          style={({ pressed }) => [
+                            styles.smallBtn,
+                            {
+                              width: "auto",
+                              paddingHorizontal: 12,
+                              backgroundColor: cryptoAccountId === account.id ? primaryColor : cardsMain,
+                              borderColor: cryptoAccountId === account.id ? primaryColor : borderColor,
+                              opacity: pressed ? 0.7 : 1,
+                            },
+                          ]}
+                        >
+                          <Text style={{ color: cryptoAccountId === account.id ? "#fff" : textColor, fontWeight: cryptoAccountId === account.id ? "700" : "400" }}>{account.nombre}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
 
                   <View style={{ flexDirection: "row", gap: 8 }}>
                     <TouchableOpacity
@@ -1968,14 +2165,14 @@ export default function AhorrosScreen() {
                 </View>
               </ScrollView>
             </KeyboardAvoidingView>
-          </View>
-        </TouchableWithoutFeedback>
+        </View>
       </Modal>
 
        <Modal visible={showTransacciones} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setShowTransacciones(false)}>
           <View style={styles.modalContainer}>
-            <View style={styles.modalContent}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalContent}>
               <View
                 style={{
                   flexDirection: "row",
@@ -2062,7 +2259,8 @@ export default function AhorrosScreen() {
                   )}
                 />
               )}
-            </View>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
@@ -2070,6 +2268,7 @@ export default function AhorrosScreen() {
       <Modal visible={showNuevo} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setShowNuevo(false)}>
           <View style={styles.modalBack}>
+            <TouchableWithoutFeedback>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalCard}>
               <ThemedText style={{ fontSize: 22, fontWeight: "800", marginBottom: 4 }}>
                 {editando ? "Editar meta" : "Nueva meta"}
@@ -2086,23 +2285,32 @@ export default function AhorrosScreen() {
                 value={nombre}
                 onChangeText={setNombre}
                 style={styles.input}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => metaInputRef.current?.focus()}
               />
 
               <TextInput
+                ref={metaInputRef}
                 placeholder="Objetivo en MXN (opcional)"
                 placeholderTextColor={textColor}
                 keyboardType="numeric"
                 value={meta}
                 onChangeText={setMeta}
                 style={styles.input}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => descripcionInputRef.current?.focus()}
               />
 
               <TextInput
+                ref={descripcionInputRef}
                 placeholder="Descripción breve (opcional)"
                 placeholderTextColor={textColor}
                 value={descripcion}
                 onChangeText={setDescripcion}
                 style={styles.input}
+                returnKeyType="done"
               />
               <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10, justifyContent: "space-between" }}>
                 <ThemedText style={{ fontSize: 13, fontWeight: "600", marginBottom: 6 }}>
@@ -2222,13 +2430,19 @@ export default function AhorrosScreen() {
                 </TouchableOpacity>
               </View>
             </KeyboardAvoidingView>
+            </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
 
       <Modal visible={quickTrade.visible} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={() => setQuickTrade((prev) => ({ ...prev, visible: false }))}>
-          <View style={styles.modalBack}>
+        <View style={styles.modalBack}>
+          <TouchableOpacity
+            onPress={() => setQuickTrade((prev) => ({ ...prev, visible: false }))}
+            activeOpacity={1}
+            style={StyleSheet.absoluteFill}
+            accessibilityLabel="Cerrar compra rápida"
+          />
             <View style={styles.modalCard}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <ThemedText style={{ fontSize: 20, fontWeight: '700' }}>
@@ -2317,6 +2531,19 @@ export default function AhorrosScreen() {
                       </TouchableOpacity>
                     ))}
                   </View>
+                  {quickTrade.ledger === 'global' && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                      {spendableAccounts.map((account) => (
+                        <TouchableOpacity
+                          key={account.id}
+                          onPress={() => setQuickTrade((prev) => ({ ...prev, accountId: account.id }))}
+                          style={[styles.smallBtn, { width: 'auto', paddingHorizontal: 12, backgroundColor: quickTrade.accountId === account.id ? primaryColor : cardsMain, borderColor: quickTrade.accountId === account.id ? primaryColor : borderColor }]}
+                        >
+                          <Text style={{ color: quickTrade.accountId === account.id ? '#fff' : textColor, fontWeight: quickTrade.accountId === account.id ? '700' : '400' }}>{account.nombre}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
 
                   <TextInput
                     placeholder={quickTrade.inputType === 'money' ? 'Monto en MXN' : `Cantidad de ${quickTrade.holding.symbol}`}
@@ -2358,7 +2585,6 @@ export default function AhorrosScreen() {
               ) : null}
             </View>
           </View>
-        </TouchableWithoutFeedback>
       </Modal>
 
       <DateTimePickerModal
@@ -2380,8 +2606,13 @@ export default function AhorrosScreen() {
 
       {/* Modal detalle: depositar / retirar */}
       <Modal visible={showDetalle} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={() => setShowDetalle(false)}>
-          <View style={styles.modalBack}>
+        <View style={styles.modalBack}>
+          <TouchableOpacity
+            onPress={() => setShowDetalle(false)}
+            activeOpacity={1}
+            style={StyleSheet.absoluteFill}
+            accessibilityLabel="Cerrar detalle de ahorro"
+          />
             <View style={styles.modalCard}>
               <ThemedText style={{ fontSize: 20, fontWeight: "700", marginBottom: 8 }}>
                 {selected?.nombre || "Detalle"}
@@ -2441,6 +2672,34 @@ export default function AhorrosScreen() {
                 </TouchableOpacity>
               </View>
 
+              {(movimientoTipo === "transferencia" || movimientoTipo === "pasarATransacciones") && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={{ color: textColor, opacity: 0.7, fontSize: 12, marginBottom: 6 }}>
+                    Cuenta {movimientoTipo === "transferencia" ? "de origen" : "de destino"}
+                  </Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    {spendableAccounts.map((account) => (
+                      <Pressable
+                        key={account.id}
+                        onPress={() => setCuentaMovimientoId(account.id)}
+                        style={({ pressed }) => [
+                          styles.smallBtn,
+                          {
+                            width: "auto",
+                            paddingHorizontal: 12,
+                            backgroundColor: cuentaMovimientoId === account.id ? primaryColor : cardsMain,
+                            borderColor: cuentaMovimientoId === account.id ? primaryColor : borderColor,
+                            opacity: pressed ? 0.7 : 1,
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: cuentaMovimientoId === account.id ? "#fff" : textColor, fontWeight: cuentaMovimientoId === account.id ? "700" : "400" }}>{account.nombre}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              )}
+
               <TextInput
                 ref={movimientoInputRef}
                 placeholder="Monto"
@@ -2449,6 +2708,8 @@ export default function AhorrosScreen() {
                 value={movimientoMonto}
                 onChangeText={setMovimientoMonto}
                 style={styles.input}
+                returnKeyType="done"
+                onSubmitEditing={ejecutarMovimiento}
               />
 
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
@@ -2470,11 +2731,9 @@ export default function AhorrosScreen() {
               </View>
             </View>
           </View>
-        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
 }
 
 // estilos
-

@@ -20,6 +20,33 @@ type PeriodKey = '7d' | '30d' | '12m' | 'all' | 'week' | 'month' | 'year';
 type AnalysisFavoriteKey = 'analysis-overview' | 'analysis-insights' | 'analysis-activity' | 'analysis-budgets' | 'analysis-trend' | 'analysis-flow' | 'analysis-categories';
 type AnalysisSectionKey = 'summary' | 'metrics' | 'insights' | 'activity' | 'budgets' | 'trend' | 'cashflow' | 'categories' | 'weekday' | 'monthlyInsights' | 'largestExpense' | 'savings-evolution';
 
+const ANALYSIS_TOUR_STEPS = [
+  {
+    target: 'header',
+    icon: 'analytics-outline' as const,
+    title: 'Tu análisis financiero',
+    description: 'Consulta tus patrones, indicadores y evolución financiera en un solo lugar.',
+  },
+  {
+    target: 'periods',
+    icon: 'calendar-outline' as const,
+    title: 'Cambia el periodo',
+    description: 'Toca un periodo para actualizar el análisis. Tócalo dos veces para cambiar rápidamente a esta semana, este mes o este año.',
+  },
+  {
+    target: 'summary',
+    icon: 'wallet-outline' as const,
+    title: 'Resumen del periodo',
+    description: 'Aquí puedes ver tu balance, ingresos y egresos del periodo seleccionado.',
+  },
+  {
+    target: 'charts',
+    icon: 'pie-chart-outline' as const,
+    title: 'Explora tus gráficas',
+    description: 'Revisa categorías, tendencias, flujo de efectivo y otros indicadores para entender mejor tus decisiones.',
+  },
+];
+
 const ANALYSIS_SECTION_DEFAULTS: Array<{ key: AnalysisSectionKey; visible: boolean; configurable: boolean }> = [
   { key: 'summary', visible: true, configurable: true },
   { key: 'metrics', visible: true, configurable: true },
@@ -38,6 +65,7 @@ const ANALYSIS_SECTION_DEFAULTS: Array<{ key: AnalysisSectionKey; visible: boole
 type Transaction = {
   id: string;
   tipo?: string;
+  tipoMovimiento?: string;
   monto?: number;
   date?: Date | null;
   fecha?: any;
@@ -63,6 +91,9 @@ const amountOf = (value: any) => {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : 0;
 };
+
+const isInternalTransfer = (transaction: Transaction) =>
+  transaction.tipo === 'transferencia' || transaction.tipoMovimiento === 'transferencia_interna';
 
 const currency = (value: number, decimals = 0) =>
   `$${value.toLocaleString('es-MX', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
@@ -116,6 +147,33 @@ export default function AnalisisScreen() {
   const [analysisSections, setAnalysisSections] = useState(ANALYSIS_SECTION_DEFAULTS);
   const [showSectionOrderModal, setShowSectionOrderModal] = useState(false);
   const [savingsGoals, setSavingsGoals] = useState<any[]>([]);
+  const [showAnalysisTour, setShowAnalysisTour] = useState(false);
+  const [analysisTourStep, setAnalysisTourStep] = useState(0);
+  const [analysisTourTarget, setAnalysisTourTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const analysisTourRefs = {
+    header: useRef<View>(null),
+    periods: useRef<View>(null),
+    summary: useRef<View>(null),
+    charts: useRef<View>(null),
+  };
+  const analysisScrollRef = useRef<ScrollView>(null);
+  const analysisLayoutY = useRef<Record<string, number>>({});
+  const analysisTourStorageKey = user?.uid ? `konta.analysis-tour.v1.${user.uid}` : null;
+
+  useEffect(() => {
+    if (!analysisTourStorageKey) return;
+    AsyncStorage.getItem(analysisTourStorageKey).then((seen) => {
+      setShowAnalysisTour(seen !== 'true');
+    }).catch((error) => console.error('No se pudo cargar el recorrido de Análisis:', error));
+  }, [analysisTourStorageKey]);
+
+  const finishAnalysisTour = async () => {
+    if (analysisTourStorageKey) {
+      await AsyncStorage.setItem(analysisTourStorageKey, 'true');
+    }
+    setShowAnalysisTour(false);
+    setAnalysisTourStep(0);
+  };
 
   const backgroundColor = useThemeColor({ light: '', dark: '' }, 'background2');
   const cardColor = useThemeColor({ light: '', dark: '' }, 'cardsMain');
@@ -124,6 +182,33 @@ export default function AnalisisScreen() {
   const borderColor = useThemeColor({ light: '', dark: '' }, 'border');
   const primaryColor = useThemeColor({ light: '', dark: '' }, 'primary');
   const progressColor = useThemeColor({ light: '', dark: '' }, 'progressBg');
+
+  const measureAnalysisTourTarget = () => {
+    const target = ANALYSIS_TOUR_STEPS[analysisTourStep]?.target as keyof typeof analysisTourRefs | undefined;
+    const node = target ? analysisTourRefs[target].current : null;
+    if (!node) {
+      setAnalysisTourTarget(null);
+      return;
+    }
+    node.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) setAnalysisTourTarget({ x, y, width, height });
+    });
+  };
+
+  useEffect(() => {
+    if (!showAnalysisTour) return;
+    const target = ANALYSIS_TOUR_STEPS[analysisTourStep]?.target;
+    const layoutY = analysisLayoutY.current[target];
+    if (layoutY !== undefined && target !== 'header' && target !== 'periods') {
+      analysisScrollRef.current?.scrollTo({ y: Math.max(0, layoutY - 120), animated: true });
+    }
+    const firstTimer = setTimeout(measureAnalysisTourTarget, target === 'header' || target === 'periods' ? 180 : 650);
+    const secondTimer = setTimeout(measureAnalysisTourTarget, target === 'header' || target === 'periods' ? 350 : 1100);
+    return () => {
+      clearTimeout(firstTimer);
+      clearTimeout(secondTimer);
+    };
+  }, [analysisTourStep, showAnalysisTour, analysisSections.length, period]);
 
   useEffect(() => {
     const userId = (user as any)?.uid;
@@ -278,6 +363,7 @@ export default function AnalisisScreen() {
         date: toDate(transaction.date || transaction.fecha),
         monto: amountOf(transaction.monto),
       }))
+      .filter((transaction) => !isInternalTransfer(transaction))
       .filter((transaction) => !since || transaction.date >= since)
       .sort((a, b) => a.date.getTime() - b.date.getTime());
 
@@ -369,6 +455,7 @@ export default function AnalisisScreen() {
         date: toDate(transaction.date || transaction.fecha),
         monto: amountOf(transaction.monto),
       }))
+      .filter((transaction) => !isInternalTransfer(transaction))
       .filter((transaction) => transaction.date >= currentMonthStart && transaction.date <= now && transaction.tipo !== 'ingreso')
       .forEach((transaction) => addExpenseCategories(transaction, currentMonthCategories));
 
@@ -440,6 +527,7 @@ export default function AnalisisScreen() {
         monto: amountOf(transaction.monto),
         date: toDate(transaction.date || transaction.fecha),
       };
+      if (isInternalTransfer(normalized)) return;
       if (normalized.tipo === 'ingreso') historicalIngresos += normalized.monto;
       else {
         historicalEgresos += normalized.monto;
@@ -644,10 +732,62 @@ export default function AnalisisScreen() {
     });
   };
 
+  const analysisTourCardTop = analysisTourTarget
+    ? analysisTourTarget.y > Dimensions.get('window').height * 0.48
+      ? 24
+      : Math.min(analysisTourTarget.y + analysisTourTarget.height + 16, Dimensions.get('window').height - 360)
+    : 180;
+
   return (
     <View style={{ flex: 1, backgroundColor }}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 56, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+      {showAnalysisTour && (
+        <View style={{ ...({ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } as const), zIndex: 50 }} pointerEvents="box-none">
+          {analysisTourTarget ? (
+            <>
+              <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: Math.max(0, analysisTourTarget.y - 8), backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: analysisTourTarget.y - 8, left: 0, width: Math.max(0, analysisTourTarget.x - 8), height: analysisTourTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: analysisTourTarget.y - 8, right: 0, width: Math.max(0, screenWidth - analysisTourTarget.x - analysisTourTarget.width - 8), height: analysisTourTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: analysisTourTarget.y + analysisTourTarget.height + 8, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: analysisTourTarget.y - 8, left: analysisTourTarget.x - 8, width: analysisTourTarget.width + 16, height: analysisTourTarget.height + 16, borderRadius: 16, borderWidth: 2, borderColor: primaryColor, shadowColor: primaryColor, shadowOpacity: 0.9, shadowRadius: 12, elevation: 12 }} />
+            </>
+          ) : (
+            <View pointerEvents="none" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+          )}
+          <View pointerEvents="box-none" style={{ position: 'absolute', top: analysisTourCardTop, left: 16, right: 16 }}>
+            <View style={{ backgroundColor, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: `${primaryColor}35`, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <ThemedText style={{ color: textColor, fontSize: 12, opacity: 0.8 }}>Recorrido de Análisis</ThemedText>
+                <TouchableOpacity onPress={finishAnalysisTour} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+                  <ThemedText style={{ color: '#94a3b8', fontSize: 12, fontWeight: '700' }}>Omitir</ThemedText>
+                </TouchableOpacity>
+              </View>
+              <View style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginTop: 10, marginBottom: 10, backgroundColor: `${primaryColor}20`, borderWidth: 1, borderColor: `${primaryColor}55` }}>
+                <Ionicons name={ANALYSIS_TOUR_STEPS[analysisTourStep].icon} size={28} color={primaryColor} />
+              </View>
+              <ThemedText style={{ color: textColor, fontSize: 20, fontWeight: '800', marginBottom: 8 }}>{ANALYSIS_TOUR_STEPS[analysisTourStep].title}</ThemedText>
+              <ThemedText style={{ color: textColor, fontSize: 13, opacity: 0.86, lineHeight: 20 }}>{ANALYSIS_TOUR_STEPS[analysisTourStep].description}</ThemedText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, marginBottom: 14 }}>
+                {ANALYSIS_TOUR_STEPS.map((_, index) => <View key={`analysis-dot-${index}`} style={{ width: analysisTourStep === index ? 20 : 8, height: 8, borderRadius: 99, marginRight: 6, backgroundColor: analysisTourStep === index ? primaryColor : `${primaryColor}35` }} />)}
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <TouchableOpacity disabled={analysisTourStep === 0} onPress={() => setAnalysisTourStep((step) => Math.max(0, step - 1))} style={{ borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: `${primaryColor}45`, opacity: analysisTourStep === 0 ? 0.4 : 1 }}>
+                  <ThemedText style={{ color: textColor, fontSize: 12, fontWeight: '700' }}>Atrás</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => analysisTourStep >= ANALYSIS_TOUR_STEPS.length - 1 ? finishAnalysisTour() : setAnalysisTourStep((step) => step + 1)} style={{ borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: primaryColor }}>
+                  <ThemedText style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{analysisTourStep >= ANALYSIS_TOUR_STEPS.length - 1 ? 'Listo' : 'Siguiente'}</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
+      <ScrollView ref={analysisScrollRef} contentContainerStyle={{ padding: 16, paddingTop: 56, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+        <View
+          ref={analysisTourRefs.header}
+          collapsable={false}
+          onLayout={(event) => { analysisLayoutY.current.header = event.nativeEvent.layout.y; }}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}
+        >
           <View>
             <ThemedText style={{ fontSize: 26, fontWeight: '800' }}>Análisis</ThemedText>
             <ThemedText style={{ color: mutedColor, fontSize: 12, marginTop: 3 }}>Tus decisiones financieras, más claras.</ThemedText>
@@ -662,6 +802,11 @@ export default function AnalisisScreen() {
           </View>
         </View>
 
+        <View
+          ref={analysisTourRefs.periods}
+          collapsable={false}
+          onLayout={(event) => { analysisLayoutY.current.periods = event.nativeEvent.layout.y; }}
+        >
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 14 }}>
           {periodOptions.map((option) => (
             <TouchableOpacity
@@ -673,8 +818,14 @@ export default function AnalisisScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
+        </View>
 
-        {isSectionVisible('summary') && <View style={{ ...cardStyle, backgroundColor: primaryColor }}>
+        {isSectionVisible('summary') && <View
+          ref={analysisTourRefs.summary}
+          collapsable={false}
+          onLayout={(event) => { analysisLayoutY.current.summary = event.nativeEvent.layout.y; }}
+          style={{ ...cardStyle, backgroundColor: primaryColor }}
+        >
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <ThemedText style={{ color: '#dcfce7', fontSize: 12, fontWeight: '700' }}>Balance del periodo</ThemedText>
             {favoriteButton('analysis-overview', 'Resumen financiero', 'Balance e indicadores principales')}
@@ -742,7 +893,12 @@ export default function AnalisisScreen() {
           </View>
         )}
 
-        {isSectionVisible('insights') && <View style={cardStyle}>
+        {isSectionVisible('insights') && <View
+          ref={analysisTourRefs.charts}
+          collapsable={false}
+          onLayout={(event) => { analysisLayoutY.current.charts = event.nativeEvent.layout.y; }}
+          style={cardStyle}
+        >
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <ThemedText style={{ color: textColor, fontSize: 16, fontWeight: '800' }}>Lecturas rápidas</ThemedText>
             {favoriteButton('analysis-insights', 'Lecturas rápidas', 'Hábitos y calidad de registro')}

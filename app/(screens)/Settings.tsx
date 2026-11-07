@@ -1,4 +1,3 @@
-import { NotificationTestPanel } from '@/components/NotificationTestPanel';
 import { ThemedText } from '@/components/ThemedText';
 import { useAppTheme } from '@/hooks/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
@@ -6,20 +5,25 @@ import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet';
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from 'expo-image-picker';
 import * as LocalAuthentication from "expo-local-authentication";
 import { router, useLocalSearchParams } from 'expo-router';
 import { sendEmailVerification, signOut, updateProfile } from "firebase/auth";
 import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { httpsCallableFromURL } from 'firebase/functions';
+import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   BackHandler,
+  Image,
   Linking,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   Switch,
   Text,
   TextInput,
@@ -41,7 +45,7 @@ import {
   type Subscription,
 } from 'react-native-iap';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth, db, functions as firebaseFunctions } from '../../config/firebase';
+import { auth, db, functions as firebaseFunctions, storage } from '../../config/firebase';
 
 type SettingsModal = 'profile' | 'editProfile' | 'security' | 'notifications' | 'theme' | 'subscription' | 'suggestions' | null;
 
@@ -62,18 +66,19 @@ interface SupportPlan {
 }
 
 export default function Settings() {
-  const params = useLocalSearchParams<{ openSubscription?: string }>();
+  const params = useLocalSearchParams<{ openSubscription?: string; openProfile?: string }>();
   const { uid, loading, displayname, correo, metadata, user, emailVerified } = useAuth();
   const { themeMode, setThemeMode } = useAppTheme();
   
   // State Management
   const [activeModal, setActiveModal] = useState<SettingsModal>(null);
   const [newName, setNewName] = useState("");
+  const [profilePhotoUri, setProfilePhotoUri] = useState(user?.photoURL || '');
+  const [uploadingProfilePhoto, setUploadingProfilePhoto] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [localAuthEnabled, setLocalAuthEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [isTextVisible, setIsTextVisible] = useState(false);
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [trialOfferClaimed, setTrialOfferClaimed] = useState(false);
   const [trialStartedAt, setTrialStartedAt] = useState<Date | null>(null);
@@ -83,6 +88,7 @@ export default function Settings() {
   const [iapReady, setIapReady] = useState(false);
   const [availableSubscriptions, setAvailableSubscriptions] = useState<Subscription[]>([]);
   const [syncingPlay, setSyncingPlay] = useState(false);
+  const newNameInputRef = useRef<TextInput>(null);
   const [sendingVerification, setSendingVerification] = useState(false);
   const [suggestionText, setSuggestionText] = useState('');
   const [sendingSuggestion, setSendingSuggestion] = useState(false);
@@ -90,6 +96,7 @@ export default function Settings() {
   const [lastSubscribedAmount, setLastSubscribedAmount] = useState<number | null>(null);
   const [streakCurrent, setStreakCurrent] = useState(0);
   const [selectedOfferToken, setSelectedOfferToken] = useState<string | null>(null);
+  const settingsScrollY = useRef(new Animated.Value(0)).current;
 
   // Modal References
   const modalRef = useRef<BottomSheetModal>(null);
@@ -134,6 +141,7 @@ export default function Settings() {
   const SUBSCRIPTION_PRODUCT_ID = 'konta_support';
   const supportedSkus = [SUBSCRIPTION_PRODUCT_ID];
   const openSubscriptionFromParamsHandledRef = useRef(false);
+  const openProfileFromParamsHandledRef = useRef(false);
   const pendingPurchaseAmountRef = useRef<number | null>(null);
   const purchaseFlowActiveRef = useRef(false);
   const processedPurchaseKeyRef = useRef<string | null>(null);
@@ -522,17 +530,50 @@ export default function Settings() {
     openModal('subscription');
   }, [params.openSubscription]);
 
+  useEffect(() => {
+    if (params.openProfile !== '1' || openProfileFromParamsHandledRef.current) return;
+    openProfileFromParamsHandledRef.current = true;
+    openModal('profile');
+  }, [params.openProfile]);
+
  
 
   // Functions
   const openModal = (modal: SettingsModal) => {
+    if (modal === 'editProfile') {
+      setNewName(displayname || user?.displayName || '');
+    }
     setActiveModal(modal);
     modalRef.current?.present();
   };
 
+  useEffect(() => {
+    if (activeModal !== 'editProfile') return;
+
+    const focusTimer = setTimeout(() => {
+      newNameInputRef.current?.focus();
+    }, 250);
+
+    return () => clearTimeout(focusTimer);
+  }, [activeModal]);
+
   const closeModal = () => {
     modalRef.current?.dismiss();
     setActiveModal(null);
+  };
+
+  const handleInviteFriends = async () => {
+    const appLink = `https://play.google.com/store/apps/details?id=${PLAY_PACKAGE}`;
+    try {
+      await Share.share({
+        title: 'Konta',
+        message: `Estoy usando Konta para organizar mis finanzas. Descárgala aquí: ${appLink}`,
+        url: appLink,
+      });
+    } catch (error) {
+      console.error('Error al compartir Konta:', error);
+      Alert.alert('No se pudo compartir', 'Intenta nuevamente en unos segundos.');
+    }
   };
 
   const handleLogout = async () => {
@@ -579,6 +620,40 @@ export default function Settings() {
       Alert.alert("Error", "No pudimos actualizar tu perfil");
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handlePickProfilePhoto = async () => {
+    if (!user?.uid) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permiso necesario', 'Permite acceder a tus fotos para elegir una imagen de perfil.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0]?.uri) return;
+
+    try {
+      setUploadingProfilePhoto(true);
+      const response = await fetch(result.assets[0].uri);
+      const blob = await response.blob();
+      const imageRef = storageRef(storage, `users/${user.uid}/profile/avatar.jpg`);
+      await uploadBytes(imageRef, blob, { contentType: result.assets[0].mimeType || 'image/jpeg' });
+      const photoURL = await getDownloadURL(imageRef);
+      await updateProfile(user, { photoURL });
+      await setDoc(doc(db, `people/${user.uid}`), { photoURL, updatedAt: new Date() }, { merge: true });
+      setProfilePhotoUri(photoURL);
+      ToastAndroid.showWithGravity('Foto de perfil actualizada', ToastAndroid.SHORT, ToastAndroid.BOTTOM);
+    } catch (error) {
+      console.error('Error al actualizar la foto de perfil:', error);
+      Alert.alert('Error', 'No se pudo actualizar la foto de perfil.');
+    } finally {
+      setUploadingProfilePhoto(false);
     }
   };
 
@@ -1176,10 +1251,17 @@ export default function Settings() {
   const settingsOptions: SettingOption[] = [
     {
       id: 'profile',
-      title: 'Cuenta',
+      title: 'Información personal',
       icon: 'person',
-      description: 'Información personal y perfil',
+      description: 'Nombre, foto y correo',
       onPress: () => openModal('profile'),
+    },
+    {
+      id: 'account-data',
+      title: 'Datos de la cuenta',
+      icon: 'business',
+      description: 'Gestiona tus cuentas y patrimonio',
+      onPress: () => router.push('/(screens)/AccountsScreen'),
     },
     {
       id: 'notifications',
@@ -1221,6 +1303,20 @@ export default function Settings() {
       onPress: () => openModal('suggestions'),
     },
     {
+      id: 'statements',
+      title: 'Estados de cuenta',
+      icon: 'document-text',
+      description: 'Consulta y exporta tus movimientos',
+      onPress: () => Alert.alert('Estados de cuenta', 'Puedes consultar y filtrar tus movimientos desde Historial.'),
+    },
+    {
+      id: 'faq',
+      title: 'Preguntas frecuentes',
+      icon: 'help-circle',
+      description: 'Respuestas sobre Konta',
+      onPress: () => router.push('/(screens)/HelpCenterScreen'),
+    },
+    {
       id: 'privacy',
       title: 'Política de privacidad',
       icon: 'document-text',
@@ -1236,57 +1332,79 @@ export default function Settings() {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 16,
-        marginVertical: 4,
-        marginHorizontal: 12,
-        backgroundColor: cardsMain,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: `${textColor}15`,
+        minHeight: 62,
+        paddingHorizontal: 20,
       }}
     >
       <Icon
         type="ionicon"
         name={option.icon}
         color={textColor}
-        size={24}
-        containerStyle={{ marginRight: 12 }}
+        size={25}
+        containerStyle={{ width: 34, marginRight: 14 }}
       />
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 16, fontWeight: '600', color: textColor, marginBottom: 2 }}>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: textColor }}>
           {option.title}
         </Text>
-        {option.description && (
-          <Text style={{ fontSize: 12, color: `${textColor}80` }}>
-            {option.description}
-          </Text>
-        )}
       </View>
-      <Icon
-        type="ionicon"
-        name="chevron-forward"
-        color={`${textColor}60`}
-        size={20}
-      />
     </TouchableOpacity>
   );
+
+  const renderSettingGroup = (title: string, ids: string[]) => {
+    const options = ids
+      .map((id) => settingsOptions.find((option) => option.id === id))
+      .filter((option): option is SettingOption => Boolean(option));
+    if (options.length === 0) return null;
+    return (
+      <View style={{ marginHorizontal: 12, marginBottom: 14 }}>
+        {title ? (
+          <Text style={{ color: `${textColor}70`, fontSize: 13, fontWeight: '700', marginBottom: 8, marginLeft: 20 }}>
+            {title.toUpperCase()}
+          </Text>
+        ) : null}
+        <View style={{ backgroundColor: cardsMain, borderRadius: 24, overflow: 'hidden' }}>
+          {options.map((option, index) => (
+            <View key={option.id}>
+              {renderSettingItem(option)}
+              {index < options.length - 1 ? <View style={{ height: 1, backgroundColor: `${textColor}0d`, marginLeft: 68 }} /> : null}
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
 
   const renderProfileModal = () => (
     <ScrollView
       contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 20 }}
       style={{ backgroundColor: themeBg }}
     >
-      <Text style={{ fontSize: 28, fontWeight: 'bold', color: textColor, marginBottom: 30, textAlign: 'center' }}>
-        Mi Perfil
-      </Text>
+      <View style={{ alignItems: 'center', marginBottom: 24 }}>
+        <TouchableOpacity onPress={handlePickProfilePhoto} disabled={uploadingProfilePhoto} style={{ marginBottom: 12 }}>
+          {profilePhotoUri ? (
+            <Image source={{ uri: profilePhotoUri }} style={{ width: 92, height: 92, borderRadius: 46 }} />
+          ) : (
+            <View style={{ width: 92, height: 92, borderRadius: 46, backgroundColor: `${primaryColor}22`, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="person" size={42} color={primaryColor} />
+            </View>
+          )}
+          <View style={{ position: 'absolute', right: 0, bottom: 0, width: 30, height: 30, borderRadius: 15, backgroundColor: primaryColor, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name={uploadingProfilePhoto ? 'hourglass-outline' : 'camera-outline'} size={16} color="#fff" />
+          </View>
+        </TouchableOpacity>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 26, fontWeight: '800', color: textColor, maxWidth: '100%' }}>
+          {displayname || 'Mi perfil'}
+        </Text>
+        <Text style={{ color: `${textColor}80`, marginTop: 4 }}>Toca la cámara para cambiar tu foto</Text>
+      </View>
 
       {/* Profile Info Card */}
       <View style={{ backgroundColor: cardsMain, borderRadius: 12, padding: 20, marginBottom: 20 }}>
         <Text style={{ fontSize: 18, fontWeight: '600', color: textColor, marginBottom: 8 }}>
           Nombre
         </Text>
-        <Text style={{ fontSize: 24, fontWeight: 'bold', color: primaryColor, marginBottom: 16 }}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 24, fontWeight: 'bold', color: primaryColor, marginBottom: 16 }}>
           {displayname || "Sin nombre"}
         </Text>
 
@@ -1399,6 +1517,7 @@ export default function Settings() {
       </Text>
 
       <TextInput
+        ref={newNameInputRef}
         style={{
           backgroundColor: cardsMain,
           color: textColor,
@@ -1409,6 +1528,7 @@ export default function Settings() {
           borderWidth: 1,
           borderColor: `${primaryColor}40`,
         }}
+        value={newName}
         onChangeText={setNewName}
         placeholder="Nuevo nombre"
         placeholderTextColor={`${textColor}60`}
@@ -1928,19 +2048,165 @@ export default function Settings() {
   );
 
   return (
-    <SafeAreaView style={{ backgroundColor: backgroundColor, flex: 1 }}>
-      <ScrollView style={{ flex: 1 }}>
-        {/* Header */}
-        <View style={{ paddingHorizontal: 16, paddingVertical: 20 }}>
-          <ThemedText style={{ fontSize: 32, fontWeight: 'bold', marginBottom: 8, paddingTop:5, height: 35 }}>
-            Ajustes
+      <SafeAreaView style={{ backgroundColor: backgroundColor, flex: 1 }}>
+      <View style={{ paddingTop: 30,paddingLeft: 10,position: 'absolute', top: 0, left: 0, right: 0, height: 70, zIndex: 10 }} pointerEvents="box-none">
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 70,
+            backgroundColor: `${backgroundColor}ee`,
+            borderBottomWidth: 1,
+            borderBottomColor: `${borderColor}44`,
+            opacity: settingsScrollY.interpolate({
+              inputRange: [52, 110],
+              outputRange: [0, 1],
+              extrapolate: 'clamp',
+            }),
+            transform: [{
+              translateY: settingsScrollY.interpolate({
+                inputRange: [52, 110],
+                outputRange: [-12, 0],
+                extrapolate: 'clamp',
+              }),
+            }],
+          }}
+        />
+        <TouchableOpacity
+          onPress={() => router.back()}
+          accessibilityLabel="Regresar a inicio"
+          hitSlop={10}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name="close" size={40} color={textColor} />
+        </TouchableOpacity>
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 40,
+            left: 0,
+            right: 14,
+            opacity: settingsScrollY.interpolate({
+              inputRange: [52, 110],
+              outputRange: [0, 1],
+              extrapolate: 'clamp',
+            }),
+            transform: [{
+              translateY: settingsScrollY.interpolate({
+                inputRange: [52, 110],
+                outputRange: [-12, 0],
+                extrapolate: 'clamp',
+              }),
+            }],
+          }}
+        >
+          <ThemedText numberOfLines={1} style={{ textAlign: 'center', fontSize: 22, fontWeight: '800' }}>
+            {displayname || 'Ajustes'}
           </ThemedText>
-          <Text style={{ fontSize: 14, color: `${textColor}80` }}>
-            Administra tu cuenta y preferencias
+        </Animated.View>
+      </View>
+      <Animated.ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: 36, paddingBottom: 36 }}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: settingsScrollY } } }],
+          { useNativeDriver: true },
+        )}
+        scrollEventThrottle={16}
+      >
+        <View style={{ alignItems: 'center', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 26 }}>
+          {profilePhotoUri ? (
+            <Animated.Image
+              source={{ uri: profilePhotoUri }}
+              style={{
+                width: 250,
+                height: 250,
+                borderRadius: 250,
+                marginBottom: 18,
+                transform: [
+                  {
+                    scale: settingsScrollY.interpolate({
+                      inputRange: [0, 180],
+                      outputRange: [1, 0.6],
+                      extrapolate: 'clamp',
+                    }),
+                  },
+                  {
+                    translateY: settingsScrollY.interpolate({
+                      inputRange: [0, 180],
+                      outputRange: [0, -48],
+                      extrapolate: 'clamp',
+                    }),
+                  },
+                ],
+              }}
+            />
+          ) : (
+            <Animated.View
+              style={{
+                width: 250,
+                height: 250,
+                borderRadius: 250,
+                marginBottom: 18,
+                backgroundColor: `${primaryColor}22`,
+                alignItems: 'center',
+                justifyContent: 'center',
+                transform: [
+                  {
+                    scale: settingsScrollY.interpolate({
+                      inputRange: [0, 180],
+                      outputRange: [1, 0.6],
+                      extrapolate: 'clamp',
+                    }),
+                  },
+                  {
+                    translateY: settingsScrollY.interpolate({
+                      inputRange: [0, 180],
+                      outputRange: [0, -48],
+                      extrapolate: 'clamp',
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Ionicons name="person" size={68} color={primaryColor} />
+            </Animated.View>
+          )}
+          <ThemedText numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 30, lineHeight: 36, fontWeight: '800', textAlign: 'center', maxWidth: '100%' }}>
+            {displayname || 'Tu perfil'}
+          </ThemedText>
+          <Text style={{ fontSize: 14, color: `${textColor}75`, marginTop: 6 }}>
+            {user?.email || 'Completa tu información personal'}
           </Text>
         </View>
 
-        <NotificationTestPanel visible={isTextVisible} />
+        <View style={{ flexDirection: 'row', marginHorizontal: 12, marginBottom: 24 }}>
+          <TouchableOpacity onPress={() => openModal('subscription')} style={{ flex: 1, minHeight: 142, backgroundColor: cardsMain, borderRadius: 24, padding: 18, marginRight: 6, justifyContent: 'space-between' }}>
+            <Ionicons name="sparkles" size={28} color="#f59e0b" />
+            <View>
+              <ThemedText style={{ fontSize: 18, fontWeight: '800' }}>{subscriptionIsActive ? 'Premium' : 'Estándar'}</ThemedText>
+              <Text style={{ color: `${textColor}70`, fontSize: 14, marginTop: 3 }}>Tu plan</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleInviteFriends} style={{ flex: 1, minHeight: 142, backgroundColor: cardsMain, borderRadius: 24, padding: 18, marginLeft: 6, justifyContent: 'space-between' }}>
+            <Ionicons name="people" size={29} color={textColor} />
+            <View>
+              <ThemedText style={{ fontSize: 18, fontWeight: '800' }}>Invita a tus amigos</ThemedText>
+              <Text style={{ color: `${textColor}70`, fontSize: 14, marginTop: 3 }}>Comparte Konta</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
 
         {!emailVerified && (
           <View
@@ -1980,13 +2246,12 @@ export default function Settings() {
           </View>
         )}
 
-        {/* Settings Options */}
-        <View style={{ marginVertical: 20 }}>
-          {settingsOptions.map(renderSettingItem)}
-        </View>
+        {renderSettingGroup('', ['profile', 'account-data', 'notifications', 'statements', 'faq'])}
+        {renderSettingGroup('Seguridad', ['security'])}
+        {renderSettingGroup('Preferencias', ['theme', 'subscription', 'suggestions', 'privacy'])}
 
         {/* About Section */}
-        <View style={{ marginHorizontal: 12, marginVertical: 20, paddingHorizontal: 16, paddingVertical: 16, backgroundColor: cardsMain, borderRadius: 12, borderWidth: 1, borderColor: `${textColor}15` }}>
+        <View style={{ marginHorizontal: 12, marginVertical: 20, paddingHorizontal: 16, paddingVertical: 16, backgroundColor: cardsMain, borderRadius: 24 }}>
           <Text style={{ fontSize: 14, fontWeight: '600', color: textColor, marginBottom: 8 }}>
             Sobre Konta
           </Text>
@@ -1995,7 +2260,7 @@ export default function Settings() {
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, alignItems: 'center' }}>
             <Text style={{ fontSize: 11, color: `${textColor}60`, textAlign: 'center' }}>
-              v4.0.6   | 
+              v5.0.0   |
             </Text>
             <TouchableOpacity
               onPress={handleOpenInstagram}
@@ -2019,16 +2284,7 @@ export default function Settings() {
           </View>
         </View>
 
-        {/* Test Button */}
-        <TouchableOpacity
-          onPress={() => setIsTextVisible(!isTextVisible)}
-          style={{ paddingHorizontal: 16, paddingVertical: 8, alignItems: 'center' }}
-        >
-          <Text style={{ fontSize: 1, opacity: 0, color: `${textColor}40` }}>
-            Modo desarrollador
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
+      </Animated.ScrollView>
 
       {/* Bottom Sheet Modal */}
       <BottomSheetModal
@@ -2102,7 +2358,6 @@ export default function Settings() {
           </View>
         </View>
       )}
-    </SafeAreaView>
+      </SafeAreaView>
   );
 }
-

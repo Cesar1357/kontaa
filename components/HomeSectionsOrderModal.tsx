@@ -18,13 +18,15 @@ export type HomeSectionKey =
   | 'goal'
   | 'budget'
   | 'summary'
-  | 'compare';
+  | 'compare'
+  | 'accounts';
 export interface HomeSectionConfig {
   key: HomeSectionKey;
   visible: boolean;
 }
 
 export const HOME_SECTIONS_CONFIG_DEFAULT: HomeSectionConfig[] = [
+  { key: 'accounts', visible: true },
   { key: 'quick-access', visible: true },
   { key: 'group-quick-access', visible: true },
   { key: 'favorite-charts', visible: true },
@@ -54,6 +56,7 @@ const SECTION_LABELS: Record<HomeSectionKey, string> = {
   budget: 'Encabezado presupuesto',
   summary: 'Resumen rápido',
   compare: 'Comparativa semanal',
+  accounts: 'Cuentas y patrimonio',
 };
 
 interface HomeSectionsOrderModalProps {

@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, TextInput, ToastAndroid, TouchableOpacity, View } from "react-native";
+import { Alert, Dimensions, KeyboardAvoidingView, Platform, StyleSheet, TextInput, ToastAndroid, TouchableOpacity, View } from "react-native";
 import Animated, { FadeInDown, FadeOutUp, Layout } from "react-native-reanimated";
 import { RFValue } from 'react-native-responsive-fontsize';
 import { db } from '../../config/firebase';
@@ -10,6 +11,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { useTransactions } from '@/hooks/useTransactions';
+import { useAccounts } from '@/hooks/useAccounts';
 import { endOfDay, format, startOfDay } from "date-fns";
 import { LinearGradient } from "expo-linear-gradient";
 import { collection, deleteDoc, doc, onSnapshot } from "firebase/firestore";
@@ -24,10 +26,39 @@ const toSafeDate = (value: any): Date => {
   return Number.isNaN(converted.getTime()) ? new Date(0) : converted;
 };
 
+const HISTORY_TOUR_STEPS = [
+  {
+    target: 'summary',
+    icon: 'wallet-outline' as const,
+    title: 'Resumen financiero',
+    description: 'Consulta tus ingresos, egresos y saldo neto del periodo seleccionado.',
+  },
+  {
+    target: 'filters',
+    icon: 'options-outline' as const,
+    title: 'Filtros de movimientos',
+    description: 'Filtra por periodo, cuenta, categoría, tipo de movimiento y monto.',
+  },
+  {
+    target: 'analysis',
+    icon: 'pie-chart-outline' as const,
+    title: 'Análisis',
+    description: 'Abre el análisis financiero para consultar gráficas y tendencias.',
+  },
+  {
+    target: 'transactions',
+    icon: 'list-outline' as const,
+    title: 'Tus movimientos',
+    description: 'Revisa cada transacción, su categoría, cuenta y fecha.',
+  },
+];
+
 export default function HistorialScreen() {
+  const { accountId: routeAccountId } = useLocalSearchParams<{ accountId?: string }>();
   const { user } = useAuth();
   const userId = (user as any)?.uid as string | undefined;
   const transaccionesBase = useTransactions(userId);
+  const accounts = useAccounts(userId);
   const [transacciones, setTransacciones] = useState<any[]>([]);
   const [accionesCatalogo, setAccionesCatalogo] = useState<Record<string, any>>({});
   const textColor = useThemeColor({ light: '', dark: '' }, 'text');
@@ -50,13 +81,75 @@ export default function HistorialScreen() {
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [range, setRange] = useState<'Total' | '1S' | '1A' | '1M'>('Total');
   const [selectedTipos, setSelectedTipos] = useState<string[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedCategorias, setSelectedCategorias] = useState<string[]>([]);
   const [selectedSubcategorias, setSelectedSubcategorias] = useState<string[]>([]);
   const [selectedPreestablecidos, setSelectedPreestablecidos] = useState<string[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<Date | null>(null);
   const [amountFilter, setAmountFilter] = useState<'all' | '0-99' | '100-499' | '500-999' | '1000-4999' | '5000+' >('all');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showHistoryTour, setShowHistoryTour] = useState(false);
+  const [historyTourStep, setHistoryTourStep] = useState(0);
+  const [historyTourTarget, setHistoryTourTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const historyTourRefs = {
+    summary: React.useRef<View>(null),
+    filters: React.useRef<View>(null),
+    analysis: React.useRef<View>(null),
+    transactions: React.useRef<View>(null),
+  };
+  const historyScrollRef = React.useRef<any>(null);
+  const historyTourStorageKey = userId ? `konta.history-tour.v1.${userId}` : null;
+  const analysisLayoutY = React.useRef(0);
+  const transactionsLayoutY = React.useRef(0);
+
+  useEffect(() => {
+    if (!historyTourStorageKey) return;
+    AsyncStorage.getItem(historyTourStorageKey).then((seen) => {
+      setShowHistoryTour(seen !== 'true');
+    }).catch((error) => console.error('No se pudo cargar el recorrido de Historial:', error));
+  }, [historyTourStorageKey]);
+
+  const finishHistoryTour = async () => {
+    if (historyTourStorageKey) {
+      await AsyncStorage.setItem(historyTourStorageKey, 'true');
+    }
+    setShowHistoryTour(false);
+    setHistoryTourStep(0);
+  };
+
+  const measureHistoryTourTarget = () => {
+    const target = HISTORY_TOUR_STEPS[historyTourStep]?.target as keyof typeof historyTourRefs | undefined;
+    const node = target ? historyTourRefs[target].current : null;
+    if (!node) {
+      setHistoryTourTarget(null);
+      return;
+    }
+    node.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) setHistoryTourTarget({ x, y, width, height });
+    });
+  };
+
+  useEffect(() => {
+    if (!showHistoryTour) return;
+    const target = HISTORY_TOUR_STEPS[historyTourStep]?.target;
+    const layoutY = target === 'analysis'
+      ? analysisLayoutY.current
+      : target === 'transactions'
+        ? transactionsLayoutY.current
+        : null;
+    if (layoutY !== null && layoutY > 0) {
+      historyScrollRef.current?.scrollTo?.({ y: Math.max(0, layoutY - 140), animated: true });
+    }
+    const firstTimer = setTimeout(measureHistoryTourTarget, target === 'summary' || target === 'filters' ? 180 : 650);
+    const secondTimer = setTimeout(measureHistoryTourTarget, target === 'summary' || target === 'filters' ? 350 : 1100);
+    return () => {
+      clearTimeout(firstTimer);
+      clearTimeout(secondTimer);
+    };
+  }, [historyTourStep, showHistoryTour, filtered.length, showAdvancedFilters]);
   const [subscriptionActive, setSubscriptionActive] = useState(false);
+  const [filtersLoaded, setFiltersLoaded] = useState(false);
+  const filtersStorageKey = userId ? `@kontaa:historial-filtros:${userId}` : null;
 
   const rangeOptions = [
     { key: 'Total', label: 'Todos' },
@@ -79,6 +172,36 @@ export default function HistorialScreen() {
       ? 'Ahorro'
       : transaction?.presupuestoCategoria || transaction?.categoria || transaction?.categoriaNombre || ''
   );
+
+  useEffect(() => {
+    if (!filtersStorageKey) return;
+    AsyncStorage.getItem(filtersStorageKey)
+      .then((stored) => {
+        if (!stored) return;
+        const saved = JSON.parse(stored);
+        if (Array.isArray(saved.selectedTipos)) setSelectedTipos(saved.selectedTipos);
+        if (typeof saved.selectedAccountId === 'string') setSelectedAccountId(saved.selectedAccountId);
+        if (typeof saved.amountFilter === 'string') setAmountFilter(saved.amountFilter);
+        if (saved.range === 'Total' || saved.range === '1S' || saved.range === '1M' || saved.range === '1A') setRange(saved.range);
+      })
+      .catch((error) => console.error('Error al cargar filtros guardados:', error))
+      .finally(() => setFiltersLoaded(true));
+  }, [filtersStorageKey]);
+
+  useEffect(() => {
+    if (!filtersLoaded || typeof routeAccountId !== 'string' || !routeAccountId) return;
+    setSelectedAccountId(routeAccountId);
+  }, [filtersLoaded, routeAccountId]);
+
+  useEffect(() => {
+    if (!filtersStorageKey || !filtersLoaded) return;
+    AsyncStorage.setItem(filtersStorageKey, JSON.stringify({
+      selectedTipos,
+      selectedAccountId,
+      amountFilter,
+      range,
+    })).catch((error) => console.error('Error al guardar filtros:', error));
+  }, [amountFilter, filtersLoaded, filtersStorageKey, range, selectedAccountId, selectedTipos]);
 
   useEffect(() => {
     if (!userId) {
@@ -176,7 +299,7 @@ export default function HistorialScreen() {
   }, [userId]);
 
   const total = transacciones.reduce(
-    (acc, t) => acc + (t.tipo === "ingreso" ? t.monto : -t.monto),
+    (acc, t) => acc + (t.tipo === "ingreso" ? t.monto : t.tipo === "transferencia" ? 0 : -t.monto),
     0
   );
 
@@ -260,7 +383,13 @@ export default function HistorialScreen() {
   };
 
   const statsSummary = useMemo(() => {
-    const signedValues = filtered.map((tx) => (tx.tipo === 'ingreso' ? Number(tx.monto || 0) : -Number(tx.monto || 0)));
+    const signedValues = filtered.map((tx) => (
+      tx.tipo === 'ingreso'
+        ? Number(tx.monto || 0)
+        : tx.tipo === 'transferencia'
+          ? 0
+          : -Number(tx.monto || 0)
+    ));
     const absValues = filtered.map((tx) => Number(tx.monto || 0));
     const count = signedValues.length;
 
@@ -366,6 +495,14 @@ export default function HistorialScreen() {
       filteredData = filteredData.filter((t) => matchesTransactionOrGroup(t, (item) => selectedTipos.includes(item.tipo)));
     }
 
+    if (selectedAccountId) {
+      filteredData = filteredData.filter((transaction) =>
+        transaction.cuentaId === selectedAccountId
+        || transaction.cuentaOrigenId === selectedAccountId
+        || transaction.cuentaDestinoId === selectedAccountId
+      );
+    }
+
     if (selectedCategorias.length > 0) {
       filteredData = filteredData.filter((t) => matchesTransactionOrGroup(t, (item) => selectedCategorias.includes(getTransactionCategory(item))));
     }
@@ -419,7 +556,7 @@ export default function HistorialScreen() {
     });
 
     setFiltered(filteredData);
-  }, [transacciones, range, startDate, endDate, selectedTipos, selectedCategorias, selectedSubcategorias, selectedPreestablecidos, selectedMonth, amountFilter, transactionSearch]);
+  }, [transacciones, range, startDate, endDate, selectedTipos, selectedAccountId, selectedCategorias, selectedSubcategorias, selectedPreestablecidos, selectedMonth, amountFilter, transactionSearch]);
 
   const handleToggleAdvancedFilters = () => {
     if (!subscriptionActive) {
@@ -472,6 +609,7 @@ export default function HistorialScreen() {
     setSelectedMonth(null);
     setRange('Total');
     setSelectedTipos([]);
+    setSelectedAccountId(null);
     setSelectedCategorias([]);
     setSelectedSubcategorias([]);
     setSelectedPreestablecidos([]);
@@ -490,7 +628,13 @@ export default function HistorialScreen() {
       ? `Rango personalizado: ${customRangeLabel}`
       : `Mostrando: ${rangeOptions.find((opt) => opt.key === range)?.label || 'Todos'}`;
 
-  const activeAdvancedFilters = selectedTipos.length + selectedCategorias.length + selectedSubcategorias.length + selectedPreestablecidos.length + (amountFilter !== 'all' ? 1 : 0) + (selectedMonth ? 1 : 0);
+  const activeAdvancedFilters = selectedTipos.length + (selectedAccountId ? 1 : 0) + selectedCategorias.length + selectedSubcategorias.length + selectedPreestablecidos.length + (amountFilter !== 'all' ? 1 : 0) + (selectedMonth ? 1 : 0);
+  const historyTourWindowHeight = Dimensions.get('window').height;
+  const historyTourCardTop = historyTourTarget
+    ? historyTourTarget.y > historyTourWindowHeight * 0.48
+      ? 24
+      : Math.min(historyTourTarget.y + historyTourTarget.height + 16, historyTourWindowHeight - 360)
+    : 180;
 
   const matchesTransactionOrGroup = (transaction: any, predicate: (item: any) => boolean) => {
     if (predicate(transaction)) return true;
@@ -599,10 +743,68 @@ export default function HistorialScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor:backgroundColor }}>
+      {showHistoryTour && (
+        <View
+          style={{
+            ...StyleSheet.absoluteFill,
+            zIndex: 50,
+            backgroundColor: 'transparent',
+          }}
+        >
+          {historyTourTarget ? (
+            <>
+              <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: Math.max(0, historyTourTarget.y - 8), backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: historyTourTarget.y - 8, left: 0, width: Math.max(0, historyTourTarget.x - 8), height: historyTourTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: historyTourTarget.y - 8, right: 0, width: Math.max(0, Dimensions.get('window').width - historyTourTarget.x - historyTourTarget.width - 8), height: historyTourTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: historyTourTarget.y + historyTourTarget.height + 8, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: historyTourTarget.y - 8, left: historyTourTarget.x - 8, width: historyTourTarget.width + 16, height: historyTourTarget.height + 16, borderRadius: 16, borderWidth: 2, borderColor: primaryColor, shadowColor: primaryColor, shadowOpacity: 0.9, shadowRadius: 12, elevation: 12 }} />
+            </>
+          ) : (
+            <View pointerEvents="none" style={{ ...StyleSheet.absoluteFill, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+          )}
+          <View pointerEvents="box-none" style={{ position: 'absolute', top: historyTourCardTop, left: 16, right: 16 }}>
+            <View style={{ backgroundColor: backgroundColor, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: `${primaryColor}35`, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <ThemedText style={{ fontSize: 12, opacity: 0.8 }}>Recorrido de Historial</ThemedText>
+                <TouchableOpacity onPress={finishHistoryTour} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+                  <ThemedText style={{ fontSize: 12, fontWeight: '700', color: '#94a3b8' }}>Omitir</ThemedText>
+                </TouchableOpacity>
+              </View>
+              <View style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginTop: 10, marginBottom: 10, backgroundColor: `${primaryColor}20`, borderWidth: 1, borderColor: `${primaryColor}55` }}>
+                <Ionicons name={HISTORY_TOUR_STEPS[historyTourStep].icon} size={28} color={primaryColor} />
+              </View>
+              <ThemedText style={{ fontSize: 20, fontWeight: '800', marginBottom: 8 }}>{HISTORY_TOUR_STEPS[historyTourStep].title}</ThemedText>
+              <ThemedText style={{ fontSize: 13, opacity: 0.86, lineHeight: 20 }}>{HISTORY_TOUR_STEPS[historyTourStep].description}</ThemedText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, marginBottom: 14 }}>
+                {HISTORY_TOUR_STEPS.map((_, index) => <View key={`history-dot-${index}`} style={{ width: historyTourStep === index ? 20 : 8, height: 8, borderRadius: 99, marginRight: 6, backgroundColor: historyTourStep === index ? primaryColor : `${primaryColor}35` }} />)}
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <TouchableOpacity disabled={historyTourStep === 0} onPress={() => setHistoryTourStep((step) => Math.max(0, step - 1))} style={{ borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: `${primaryColor}45`, opacity: historyTourStep === 0 ? 0.4 : 1 }}>
+                  <ThemedText style={{ fontWeight: '700', fontSize: 12 }}>Atrás</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (historyTourStep >= HISTORY_TOUR_STEPS.length - 1) {
+                      finishHistoryTour();
+                      setHistoryTourStep(0);
+                    } else {
+                      setHistoryTourStep((step) => step + 1);
+                    }
+                  }}
+                  style={{ borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: primaryColor }}
+                >
+                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{historyTourStep >= HISTORY_TOUR_STEPS.length - 1 ? 'Listo' : 'Siguiente'}</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
       <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={{ flex: 1 }}>
       <ScrollView
+        ref={historyScrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{
           padding: 16,
@@ -611,7 +813,7 @@ export default function HistorialScreen() {
         }}
       >
       {/* ENCABEZADO */}
-      <Animated.View entering={FadeInDown.delay(100)} exiting={FadeOutUp}>
+      <Animated.View ref={historyTourRefs.summary} entering={FadeInDown.delay(100)} exiting={FadeOutUp}>
         <LinearGradient
           colors={headerColors}
           start={{ x: 0, y: 0 }}
@@ -661,7 +863,7 @@ export default function HistorialScreen() {
       </Animated.View>
 
       {/* FILTROS */}
-      <Animated.View entering={FadeInDown.delay(200)} exiting={FadeOutUp} layout={Layout.springify()}>
+      <Animated.View ref={historyTourRefs.filters} entering={FadeInDown.delay(200)} exiting={FadeOutUp} layout={Layout.springify()}>
         <View style={{ marginBottom: 16 }}>
           <ThemedText style={{ fontSize: 16, marginBottom: 10 }}>Filtrar movimientos</ThemedText>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -719,7 +921,7 @@ export default function HistorialScreen() {
                 Fecha: {customRangeLabel}
               </ThemedText>
             </TouchableOpacity>
-            {(startDate || endDate || selectedMonth || selectedTipos.length > 0 || selectedCategorias.length > 0 || selectedPreestablecidos.length > 0 || amountFilter !== 'all' || activeAdvancedFilters > 0) && (
+            {(startDate || endDate || selectedMonth || selectedTipos.length > 0 || selectedAccountId || selectedCategorias.length > 0 || selectedPreestablecidos.length > 0 || amountFilter !== 'all' || activeAdvancedFilters > 0) && (
               <TouchableOpacity
                 onPress={clearFilters}
                 style={{
@@ -756,6 +958,35 @@ export default function HistorialScreen() {
 
           {showAdvancedFilters && (
             <>
+              <View style={{ marginTop: 6 }}>
+                <ThemedText style={{ fontSize: 13, marginBottom: 6, color: '#9ca3af' }}>Cuenta</ThemedText>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 2 }}>
+                  <Chip
+                    selected={!selectedAccountId}
+                    compact
+                    mode="flat"
+                    onPress={() => setSelectedAccountId(null)}
+                    textStyle={{ color: !selectedAccountId ? '#ffffff' : '#9ca3af' }}
+                    style={{ margin: 4, backgroundColor: !selectedAccountId ? 'rgba(34,197,94,0.3)' : progressBg }}
+                  >
+                    Todas
+                  </Chip>
+                  {accounts.filter((account) => account.activo !== false).map((account) => (
+                    <Chip
+                      key={account.id}
+                      selected={selectedAccountId === account.id}
+                      compact
+                      mode="flat"
+                      onPress={() => setSelectedAccountId(selectedAccountId === account.id ? null : account.id)}
+                      textStyle={{ color: selectedAccountId === account.id ? '#ffffff' : '#9ca3af' }}
+                      style={{ margin: 4, backgroundColor: selectedAccountId === account.id ? 'rgba(34,197,94,0.3)' : progressBg }}
+                    >
+                      {account.nombre}
+                    </Chip>
+                  ))}
+                </View>
+              </View>
+
               <View style={{ marginTop: 6 }}>
                 <ThemedText style={{ fontSize: 13, marginBottom: 6, color: '#9ca3af' }}>Tipo</ThemedText>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 2 }}>
@@ -903,50 +1134,67 @@ export default function HistorialScreen() {
             />
 
       {/* GRÁFICAS */}
-      <Animated.View
-        entering={FadeInDown.delay(300)}
-        exiting={FadeOutUp}
-        layout={Layout.springify()}
-        
+      <View
+        ref={historyTourRefs.analysis}
+        collapsable={false}
+        onLayout={(event) => {
+          analysisLayoutY.current = event.nativeEvent.layout.y;
+        }}
         style={{
           width: "100%",
-          backgroundColor: graficaFondoColor,
-          borderRadius: 20,
-          padding: 12,
           marginBottom: 10,
-          marginTop:10
+          marginTop: 10,
         }}
       >
-        {/* Encabezado */}
-        <View
+        <Animated.View
+          entering={FadeInDown.delay(300)}
+          exiting={FadeOutUp}
+          layout={Layout.springify()}
           style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-            alignContent:"center"
+            width: "100%",
+            backgroundColor: graficaFondoColor,
+            borderRadius: 20,
+            padding: 12,
           }}
         >
-          <ThemedText
+          {/* Encabezado */}
+          <View
             style={{
-              fontWeight: "600",
-              fontSize: 16,
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+              alignContent:"center"
             }}
           >
-            Análisis
-          </ThemedText>
-          <TouchableOpacity onPress={() => router.push('/(screens)/AnalisisScreen')} accessibilityLabel="Abrir análisis financiero">
-            <Ionicons
-              name="arrow-forward-circle-outline"
-              size={RFValue(26)}
-              color={textColor}
-            />
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
+            <ThemedText
+              style={{
+                fontWeight: "600",
+                fontSize: 16,
+              }}
+            >
+              Análisis
+            </ThemedText>
+            <TouchableOpacity onPress={() => router.push('/(screens)/AnalisisScreen')} accessibilityLabel="Abrir análisis financiero">
+              <Ionicons
+                name="arrow-forward-circle-outline"
+                size={RFValue(26)}
+                color={textColor}
+              />
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </View>
 
       {/* LISTA DE TRANSACCIONES */}
       
-      <View style={{ marginBottom: 150 }}>
+      <View
+        ref={historyTourRefs.transactions}
+        collapsable={false}
+        onLayout={(event) => {
+          transactionsLayoutY.current = event.nativeEvent.layout.y;
+        }}
+        style={{ marginBottom: 150 }}
+      >
         <View
           style={{
             backgroundColor: graficaFondoColor,
@@ -1077,11 +1325,11 @@ export default function HistorialScreen() {
                 <ThemedText
                   style={{
                     textAlign: "right",
-                    color: tx.tipo === "ingreso" ? "#4ade80" : "#f87171",
+                    color: tx.tipo === "transferencia" ? "#c084fc" : tx.tipo === "ingreso" ? "#4ade80" : "#f87171",
                     fontWeight: "600",
                   }}
                 >
-                  {tx.tipo === "ingreso" ? "+" : "-"}${tx.monto.toFixed(2)}
+                  {tx.tipo === "transferencia" ? "↔ " : tx.tipo === "ingreso" ? "+" : "-"}${tx.monto.toFixed(2)}
                 </ThemedText>
               </TouchableOpacity>
             ))

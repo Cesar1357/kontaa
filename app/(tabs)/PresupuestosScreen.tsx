@@ -1,5 +1,7 @@
 import { ThemedText } from '@/components/ThemedText';
 import { useAuth } from "@/hooks/useAuth";
+import { useAccounts } from '@/hooks/useAccounts';
+import { DEFAULT_ACCOUNT_ID } from '@/services/accounts';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,6 +22,7 @@ import {
 import React, { useEffect, useMemo, useState } from "react";
 import {
     Alert,
+    Dimensions,
     KeyboardAvoidingView,
     Modal,
     NativeModules,
@@ -29,15 +32,44 @@ import {
     TouchableOpacity,
     TouchableWithoutFeedback,
     View,
+    StyleSheet,
 } from "react-native";
 import { ScrollView, TextInput } from "react-native-gesture-handler";
 import Animated, { Layout } from "react-native-reanimated";
 import { RFValue } from 'react-native-responsive-fontsize';
 import { db } from "../../config/firebase";
 
+const BUDGET_TOUR_STEPS = [
+  {
+    target: 'summary',
+    icon: 'pie-chart-outline' as const,
+    title: 'Resumen de presupuesto',
+    description: 'Consulta cuánto has gastado, cuánto tienes asignado y el porcentaje utilizado.',
+  },
+  {
+    target: 'sections',
+    icon: 'albums-outline' as const,
+    title: 'Organiza tus presupuestos',
+    description: 'Cambia entre presupuestos generales, personalizados, grupos y recurrentes.',
+  },
+  {
+    target: 'new',
+    icon: 'add-circle-outline' as const,
+    title: 'Crea un presupuesto',
+    description: 'Agrega un límite para una categoría y controla cuánto puedes gastar.',
+  },
+  {
+    target: 'content',
+    icon: 'trending-up-outline' as const,
+    title: 'Sigue tu progreso',
+    description: 'Cada categoría muestra el avance de tus gastos para ayudarte a tomar mejores decisiones.',
+  },
+];
+
 export default function PresupuestosScreen() {
   const { user } = useAuth();
   const currentUserId = (user as { uid?: string } | null)?.uid ?? null;
+  const accounts = useAccounts(currentUserId ?? undefined);
   const params = useLocalSearchParams<{ section?: string }>();
   const [presupuestos, setPresupuestos] = useState<any[]>([{ categoria: "Otros" }, { categoria: "Ahorro", temporal: true }]);
   const [presupuestoGeneral, setPresupuestoGeneral] = useState<any>({
@@ -90,6 +122,53 @@ export default function PresupuestosScreen() {
   const [quickWidgetPromptAlreadyAnswered, setQuickWidgetPromptAlreadyAnswered] = useState(false);
   const [subscriptionActive, setSubscriptionActive] = useState(false);
   const initialSectionHandledRef = React.useRef(false);
+  const [showBudgetTour, setShowBudgetTour] = useState(false);
+  const [budgetTourStep, setBudgetTourStep] = useState(0);
+  const [budgetTourTarget, setBudgetTourTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const budgetTourRefs = {
+    summary: React.useRef<View>(null),
+    sections: React.useRef<View>(null),
+    usage: React.useRef<View>(null),
+    new: React.useRef<View>(null),
+    content: React.useRef<View>(null),
+  };
+  const budgetScrollRef = React.useRef<any>(null);
+  const budgetTourStorageKey = currentUserId ? `konta.budget-tour.v1.${currentUserId}` : null;
+
+  useEffect(() => {
+    if (!budgetTourStorageKey) return;
+    AsyncStorage.getItem(budgetTourStorageKey).then((seen) => {
+      setShowBudgetTour(seen !== 'true');
+    }).catch((error) => console.error('No se pudo cargar el recorrido de Presupuestos:', error));
+  }, [budgetTourStorageKey]);
+
+  const finishBudgetTour = async () => {
+    if (budgetTourStorageKey) {
+      await AsyncStorage.setItem(budgetTourStorageKey, 'true');
+    }
+    setShowBudgetTour(false);
+    setBudgetTourStep(0);
+  };
+
+  const measureBudgetTourTarget = () => {
+    const target = BUDGET_TOUR_STEPS[budgetTourStep]?.target as keyof typeof budgetTourRefs | undefined;
+    const node = target ? budgetTourRefs[target].current : null;
+    if (!node) {
+      setBudgetTourTarget(null);
+      return;
+    }
+    node.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) setBudgetTourTarget({ x, y, width, height });
+    });
+  };
+
+  useEffect(() => {
+    if (!showBudgetTour) return;
+    const target = BUDGET_TOUR_STEPS[budgetTourStep]?.target;
+    if (target === 'content') budgetScrollRef.current?.scrollTo?.({ y: 520, animated: true });
+    const timer = setTimeout(measureBudgetTourTarget, target === 'content' ? 500 : 180);
+    return () => clearTimeout(timer);
+  }, [budgetTourStep, showBudgetTour, seccionActiva]);
 
   const FREE_LIMIT = 2;
 
@@ -102,6 +181,8 @@ export default function PresupuestosScreen() {
   const [nuevoMontoRecurrente, setNuevoMontoRecurrente] = useState("");
   const [nuevaFrecuencia, setNuevaFrecuencia] = useState("Mensual");
   const [nuevoDiaPago, setNuevoDiaPago] = useState("");
+  const [nuevaCuentaId, setNuevaCuentaId] = useState(DEFAULT_ACCOUNT_ID);
+  const [cuentaEditarRecurrenteId, setCuentaEditarRecurrenteId] = useState(DEFAULT_ACCOUNT_ID);
 
   // 📅 Fechas del mes actual
   const now = new Date();
@@ -403,6 +484,12 @@ export default function PresupuestosScreen() {
   const ocupadoColor = getBudgetBarColor(porcentajeOcupado);
   const utilizadoColor = getBudgetBarColor(porcentajeUtilizado);
   const porcentajeUsado = porcentajeOcupado.toFixed(1);
+  const budgetTourWindowHeight = Dimensions.get('window').height;
+  const budgetTourCardTop = budgetTourTarget
+    ? budgetTourTarget.y > budgetTourWindowHeight * 0.48
+      ? 24
+      : Math.min(budgetTourTarget.y + budgetTourTarget.height + 16, budgetTourWindowHeight - 360)
+    : 180;
 
   // ➕ Agregar presupuesto personalizado
   const agregarPresupuesto = async () => {
@@ -464,6 +551,7 @@ export default function PresupuestosScreen() {
         monto,
         frecuencia: nuevaFrecuencia,
         diaPago: diaPagoNum || 1,
+        cuentaId: nuevaCuentaId || DEFAULT_ACCOUNT_ID,
         creado: new Date(),
         lastUpdate: new Date(),
         activo:true,
@@ -473,6 +561,7 @@ export default function PresupuestosScreen() {
       setNuevoMontoRecurrente("");
       setNuevaFrecuencia("Mensual");
       setNuevoDiaPago("");
+      setNuevaCuentaId(DEFAULT_ACCOUNT_ID);
       setMostrarNuevoRecurrente(false);
     }else{
       agregarRecurrenteIngreso();
@@ -507,6 +596,7 @@ export default function PresupuestosScreen() {
       monto,
       frecuencia: nuevaFrecuencia,
       diaPago: diaPagoNum || 1,
+      cuentaId: nuevaCuentaId || DEFAULT_ACCOUNT_ID,
       creado: new Date(),
       lastUpdate: new Date(),
       activo:true,
@@ -516,6 +606,7 @@ export default function PresupuestosScreen() {
     setNuevoMontoRecurrente("");
     setNuevaFrecuencia("Mensual");
     setNuevoDiaPago("");
+    setNuevaCuentaId(DEFAULT_ACCOUNT_ID);
     setMostrarNuevoRecurrente(false);
 };
 
@@ -523,8 +614,9 @@ export default function PresupuestosScreen() {
   const abrirModalEditar = (presupuesto: any, tipo: "general" | "personalizado" | "recurrente") => {
     setPresupuestoEditar({ ...presupuesto, tipo });
     setNuevoValorEditar(String(presupuesto.limite || presupuesto.valor || presupuesto.monto || ""));
-    setModalEditar(true);
-  };
+     setCuentaEditarRecurrenteId(presupuesto.cuentaId || DEFAULT_ACCOUNT_ID);
+     setModalEditar(true);
+   };
 
  const guardarEdicion = async () => {
   if (!currentUserId || !presupuestoEditar) return;
@@ -552,6 +644,7 @@ export default function PresupuestosScreen() {
     else if (presupuestoEditar.tipo === "recurrente") {
       if(tipoRecurrenteActivo === "gastos"){
         dataActualizacion.monto = valor;
+        dataActualizacion.cuentaId = cuentaEditarRecurrenteId || DEFAULT_ACCOUNT_ID;
         // ✅ Solo actualiza el día si el usuario lo modificó
         if (diaPago) dataActualizacion.diaPago = parseInt(diaPago);
 
@@ -563,6 +656,7 @@ export default function PresupuestosScreen() {
       // --- INGRESOS RECURRENTES ---
       else if (tipoRecurrenteActivo === "ingresos") {
         dataActualizacion.monto = valor;
+        dataActualizacion.cuentaId = cuentaEditarRecurrenteId || DEFAULT_ACCOUNT_ID;
         if (diaPago) dataActualizacion.diaPago = parseInt(diaPago);
 
         await updateDoc(
@@ -906,7 +1000,49 @@ export default function PresupuestosScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
+      {showBudgetTour && (
+        <View style={{ ...StyleSheet.absoluteFill, zIndex: 50 }} pointerEvents="box-none">
+          {budgetTourTarget ? (
+            <>
+              <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: Math.max(0, budgetTourTarget.y - 8), backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: budgetTourTarget.y - 8, left: 0, width: Math.max(0, budgetTourTarget.x - 8), height: budgetTourTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: budgetTourTarget.y - 8, right: 0, width: Math.max(0, Dimensions.get('window').width - budgetTourTarget.x - budgetTourTarget.width - 8), height: budgetTourTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: budgetTourTarget.y + budgetTourTarget.height + 8, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: budgetTourTarget.y - 8, left: budgetTourTarget.x - 8, width: budgetTourTarget.width + 16, height: budgetTourTarget.height + 16, borderRadius: 16, borderWidth: 2, borderColor: primaryColor, shadowColor: primaryColor, shadowOpacity: 0.9, shadowRadius: 12, elevation: 12 }} />
+            </>
+          ) : (
+            <View pointerEvents="none" style={{ ...StyleSheet.absoluteFill, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+          )}
+          <View pointerEvents="box-none" style={{ position: 'absolute', top: budgetTourCardTop, left: 16, right: 16 }}>
+            <View style={{ backgroundColor: backgroundColor, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: `${primaryColor}35`, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <ThemedText style={{ fontSize: 12, opacity: 0.8 }}>Recorrido de Presupuestos</ThemedText>
+                <TouchableOpacity onPress={finishBudgetTour} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+                  <ThemedText style={{ fontSize: 12, fontWeight: '700', color: '#94a3b8' }}>Omitir</ThemedText>
+                </TouchableOpacity>
+              </View>
+              <View style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginTop: 10, marginBottom: 10, backgroundColor: `${primaryColor}20`, borderWidth: 1, borderColor: `${primaryColor}55` }}>
+                <Ionicons name={BUDGET_TOUR_STEPS[budgetTourStep].icon} size={28} color={primaryColor} />
+              </View>
+              <ThemedText style={{ fontSize: 20, fontWeight: '800', marginBottom: 8 }}>{BUDGET_TOUR_STEPS[budgetTourStep].title}</ThemedText>
+              <ThemedText style={{ fontSize: 13, opacity: 0.86, lineHeight: 20 }}>{BUDGET_TOUR_STEPS[budgetTourStep].description}</ThemedText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, marginBottom: 14 }}>
+                {BUDGET_TOUR_STEPS.map((_, index) => <View key={`budget-dot-${index}`} style={{ width: budgetTourStep === index ? 20 : 8, height: 8, borderRadius: 99, marginRight: 6, backgroundColor: budgetTourStep === index ? primaryColor : `${primaryColor}35` }} />)}
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <TouchableOpacity disabled={budgetTourStep === 0} onPress={() => setBudgetTourStep((step) => Math.max(0, step - 1))} style={{ borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: `${primaryColor}45`, opacity: budgetTourStep === 0 ? 0.4 : 1 }}>
+                  <ThemedText style={{ fontWeight: '700', fontSize: 12 }}>Atrás</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => budgetTourStep >= BUDGET_TOUR_STEPS.length - 1 ? finishBudgetTour() : setBudgetTourStep((step) => step + 1)} style={{ borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: primaryColor }}>
+                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{budgetTourStep >= BUDGET_TOUR_STEPS.length - 1 ? 'Listo' : 'Siguiente'}</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
       <ScrollView
+        ref={budgetScrollRef}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={{ paddingBottom: 24 }}
@@ -919,6 +1055,7 @@ export default function PresupuestosScreen() {
       >
       
       {/* ENCABEZADO */}
+      <View ref={budgetTourRefs.summary} collapsable={false}>
       <LinearGradient
         colors={headerColors}
         start={{ x: 0, y: 0 }}
@@ -947,7 +1084,7 @@ export default function PresupuestosScreen() {
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{porcentajeUsado}%</Text>
           </View>
 
-          <View style={{ height: 10, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 999, overflow: 'hidden', position: 'relative' }}>
+          <View ref={budgetTourRefs.usage} collapsable={false} style={{ height: 10, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 999, overflow: 'hidden', position: 'relative' }}>
             <View
               style={{
                 position: 'absolute',
@@ -981,9 +1118,12 @@ export default function PresupuestosScreen() {
           </View>
         </View>
       </LinearGradient>
+      </View>
 
       {/* BOTONES DE SECCIÓN */}
       <View
+        ref={budgetTourRefs.sections}
+        collapsable={false}
         style={{
           flexDirection: "column",
           backgroundColor: cardsMain,
@@ -1050,6 +1190,7 @@ export default function PresupuestosScreen() {
         </View>
       </View>
 
+      <View ref={budgetTourRefs.content} collapsable={false}>
       {seccionActiva === "preestablecidos" && (
         <>
           {showAddQuickWidgetPrompt && (
@@ -1470,6 +1611,7 @@ export default function PresupuestosScreen() {
       {seccionActiva === "personalizados" && (
         <>
           <TouchableOpacity
+            ref={budgetTourRefs.new}
             onPress={() => setMostrarNuevo(!mostrarNuevo)}
             style={{
               backgroundColor: "#6366f1",
@@ -1790,6 +1932,24 @@ export default function PresupuestosScreen() {
               }}
             />
 
+            <Text style={{ color: textColor, marginBottom: 6, fontWeight: "500" }}>
+              Cuenta asociada
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+              {accounts.filter((account) => account.activo !== false).map((account) => (
+                <TouchableOpacity
+                  key={account.id}
+                  onPress={() => setNuevaCuentaId(account.id)}
+                  style={[
+                    styles.presupuestoBtn,
+                    { backgroundColor: nuevaCuentaId === account.id ? "#6366f1" : "#2a2a2a" },
+                  ]}
+                >
+                  <Text style={{ color: "white" }}>{account.nombre}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
             <TouchableOpacity
               onPress={agregarRecurrente}
               style={{
@@ -1938,20 +2098,39 @@ export default function PresupuestosScreen() {
                     }}
                   />
                   {presupuestoEditar?.tipo === "recurrente" && (
-                    <TextInput
-                      placeholder="Nueva dia (1-28)"
-                      placeholderTextColor="#888"
-                      keyboardType="numeric"
-                      value={nuevoValorEditarFecha}
-                      onChangeText={setNuevoValorEditarFecha}
-                      style={{
-                        color: "#888",
-                        borderBottomColor: "#333",
-                        borderBottomWidth: 1,
-                        marginBottom: 16,
-                        paddingVertical: 4,
-                      }}
-                    />
+                    <>
+                      <TextInput
+                        placeholder="Nueva dia (1-28)"
+                        placeholderTextColor="#888"
+                        keyboardType="numeric"
+                        value={nuevoValorEditarFecha}
+                        onChangeText={setNuevoValorEditarFecha}
+                        style={{
+                          color: "#888",
+                          borderBottomColor: "#333",
+                          borderBottomWidth: 1,
+                          marginBottom: 16,
+                          paddingVertical: 4,
+                        }}
+                      />
+                      <Text style={{ color: textColor, marginBottom: 6, fontWeight: "500" }}>
+                        Cuenta asociada
+                      </Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                        {accounts.filter((account) => account.activo !== false).map((account) => (
+                          <TouchableOpacity
+                            key={account.id}
+                            onPress={() => setCuentaEditarRecurrenteId(account.id)}
+                            style={[
+                              styles.presupuestoBtn,
+                              { backgroundColor: cuentaEditarRecurrenteId === account.id ? "#6366f1" : "#2a2a2a" },
+                            ]}
+                          >
+                            <Text style={{ color: "white" }}>{account.nombre}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </>
                   )}
                   <TouchableOpacity
                     onPress={guardarEdicion}
@@ -1973,6 +2152,7 @@ export default function PresupuestosScreen() {
             </KeyboardAvoidingView>
           </TouchableWithoutFeedback>
         </Modal>
+      </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

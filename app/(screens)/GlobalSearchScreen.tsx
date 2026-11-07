@@ -36,16 +36,31 @@ export default function GlobalSearchScreen() {
 
     const loadCatalog = async () => {
       try {
-        const [transactions, groups, actions, goals, recurringExpenses, recurringIncome] = await Promise.all([
+        const [transactions, groups, actions, goals, recurringExpenses, recurringIncome, accounts, crypto, budgets, purchases, faqs] = await Promise.all([
           getDocs(collection(db, `users/${uid}/transacciones`)),
           getDocs(collection(db, `users/${uid}/preestablecidosMain`)),
           getDocs(collection(db, `users/${uid}/preestablecidosSubs`)),
           getDocs(collection(db, `users/${uid}/ahorros`)),
           getDocs(collection(db, `users/${uid}/gastosRecurrentes`)),
           getDocs(collection(db, `users/${uid}/ingresosRecurrentes`)),
+          getDocs(collection(db, `users/${uid}/cuentas`)),
+          getDocs(collection(db, `users/${uid}/criptos`)),
+          getDocs(collection(db, `users/${uid}/presupuestosPersonalizados`)),
+          getDocs(collection(db, `users/${uid}/comprasMeses`)),
+          getDocs(collection(db, 'faqs')),
         ]);
 
         const results = [
+          { id: 'home', kind: 'screen', label: 'Inicio', detail: 'Pantalla principal', search: 'inicio resumen dinero total', route: '/(tabs)' },
+          { id: 'history', kind: 'screen', label: 'Historial', detail: 'Movimientos', search: 'historial movimientos ingresos gastos transferencias', route: '/(tabs)/HistorialScreen' },
+          { id: 'analysis', kind: 'screen', label: 'Análisis', detail: 'Resumen financiero', search: 'analisis análisis balance graficas gráficos', route: '/(screens)/AnalisisScreen' },
+          { id: 'budgets-screen', kind: 'screen', label: 'Presupuestos', detail: 'Límites y categorías', search: 'presupuestos presupuesto categorías categorias', route: '/(tabs)/PresupuestosScreen' },
+          { id: 'savings-screen', kind: 'screen', label: 'Ahorros', detail: 'Metas de ahorro', search: 'ahorros ahorro metas', route: '/(tabs)/AhorrosScreen', params: { view: 'ahorros' } },
+          { id: 'crypto-screen', kind: 'screen', label: 'Cripto', detail: 'Activos digitales', search: 'cripto criptomonedas bitcoin activos digitales', route: '/(tabs)/AhorrosScreen', params: { view: 'cripto' } },
+          { id: 'apps-screen', kind: 'screen', label: 'Apps', detail: 'Herramientas financieras', search: 'apps herramientas recurrentes compras', route: '/(tabs)/AppsScreen' },
+          { id: 'settings-screen', kind: 'screen', label: 'Ajustes', detail: 'Configuración', search: 'ajustes configuración configuracion perfil tema seguridad', route: '/(screens)/Settings' },
+          { id: 'accounts-screen', kind: 'screen', label: 'Cuentas y patrimonio', detail: 'Saldos y distribución', search: 'cuentas patrimonio saldos distribución distribucion', route: '/(screens)/AccountsScreen' },
+          { id: 'help-screen', kind: 'screen', label: 'Centro de ayuda', detail: 'Preguntas frecuentes', search: 'ayuda preguntas frecuentes faq soporte', route: '/(screens)/HelpCenterScreen' },
           ...transactions.docs.map((item) => {
             const data = item.data() as any;
             return { id: item.id, kind: 'transaction', label: data.descripcion || 'Movimiento', detail: `${data.tipo === 'ingreso' ? '+' : '-'}${formatAmount(data.monto)}`, search: `${data.descripcion || ''} ${data.presupuestoCategoria || ''} ${data.preestablecidoMainNombre || ''}`, route: '/(tabs)/HistorialScreen' };
@@ -70,6 +85,27 @@ export default function GlobalSearchScreen() {
             const data = item.data() as any;
             return { id: item.id, kind: 'recurring', label: data.nombre || 'Ingreso recurrente', detail: `Ingreso · ${formatAmount(data.monto)}`, search: `${data.nombre || ''} ${data.categoria || ''}`, route: '/(tabs)/PresupuestosScreen', params: { section: 'recurrentes' } };
           }),
+          ...accounts.docs.map((item) => {
+            const data = item.data() as any;
+            return { id: item.id, kind: 'account', label: data.nombre || 'Cuenta', detail: `${data.tipo || 'Cuenta'} · ${formatAmount(data.saldoInicial)}`, search: `${data.nombre || ''} ${data.tipo || ''}`, route: '/(screens)/AccountsScreen' };
+          }),
+          ...crypto.docs.map((item) => {
+            const data = item.data() as any;
+            return { id: item.id, kind: 'crypto', label: data.name || data.nombre || data.symbol || 'Activo cripto', detail: `${data.symbol || 'Cripto'} · ${formatAmount(Number(data.quantity || 0) * Number(data.currentPrice || 0))}`, search: `${data.name || ''} ${data.nombre || ''} ${data.symbol || ''}`, route: '/(tabs)/AhorrosScreen', params: { view: 'cripto' } };
+          }),
+          ...budgets.docs.map((item) => {
+            const data = item.data() as any;
+            return { id: item.id, kind: 'budget', label: data.categoria || data.nombre || 'Presupuesto', detail: `Límite · ${formatAmount(data.limite ?? data.monto)}`, search: `${data.categoria || ''} ${data.nombre || ''}`, route: '/(tabs)/PresupuestosScreen', params: { section: 'presupuestos' } };
+          }),
+          ...purchases.docs.map((item) => {
+            const data = item.data() as any;
+            return { id: item.id, kind: 'purchase', label: data.nombre || data.descripcion || 'Compra', detail: `Compra · ${formatAmount(data.monto || data.total)}`, search: `${data.nombre || ''} ${data.descripcion || ''} ${data.categoria || ''}`, route: '/(tabs)/AppsScreen' };
+          }),
+          ...faqs.docs.map((item) => {
+            const data = item.data() as any;
+            if (data.activo === false) return null;
+            return { id: item.id, kind: 'faq', label: data.pregunta || 'Pregunta frecuente', detail: data.categoria || 'Centro de ayuda', search: `${data.pregunta || ''} ${data.respuesta || ''} ${(data.palabrasClave || []).join(' ')}`, route: '/(screens)/HelpCenterScreen' };
+          }).filter(Boolean),
         ];
 
         setCatalog(results);
@@ -95,6 +131,12 @@ export default function GlobalSearchScreen() {
     action: 'Acciones de grupo',
     goal: 'Metas',
     recurring: 'Recurrentes',
+    screen: 'Secciones',
+    account: 'Cuentas',
+    crypto: 'Cripto',
+    budget: 'Presupuestos',
+    purchase: 'Compras',
+    faq: 'Ayuda',
   };
 
   const sectionIcon: Record<string, any> = {
@@ -103,6 +145,12 @@ export default function GlobalSearchScreen() {
     action: 'flash-outline',
     goal: 'flag-outline',
     recurring: 'repeat-outline',
+    screen: 'grid-outline',
+    account: 'wallet-outline',
+    crypto: 'logo-bitcoin',
+    budget: 'pie-chart-outline',
+    purchase: 'cart-outline',
+    faq: 'help-circle-outline',
   };
 
   const navigateToItem = (item: any) => {

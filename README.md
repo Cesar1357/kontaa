@@ -24,7 +24,7 @@ rmdir /s /q android\.gradle
 GITHUB
    git pull
    git add .
-   git commit -m "4.0.6"
+   git commit -m "5.0.0"
    git push -u origin main
 
    

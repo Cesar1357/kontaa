@@ -3,10 +3,11 @@ import { ThemedView } from '@/components/ThemedView';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { useAccounts } from '@/hooks/useAccounts';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Dimensions, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Dimensions, ScrollView, TouchableOpacity, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import Animated, {
     useAnimatedStyle,
@@ -19,6 +20,7 @@ const screenWidth = Dimensions.get('window').width;
 
 export default function BalanceHeader() {
   const { user } = useAuth();
+  const accounts = useAccounts(user?.uid);
   const cardsColor = useThemeColor({light:'',dark:''},'cardsMain');
   const textColor = useThemeColor({light:'',dark:''},'text');
 
@@ -29,10 +31,10 @@ export default function BalanceHeader() {
   const [diferencia, setDiferencia] = useState(0);
   const [chartData, setChartData] = useState<number[]>([]);
   const [chartLabels, setChartLabels] = useState<string[]>([]);
-  const [colorSaldo, setColorSaldo] = useState<string>('white');
 
   const [range, setRange] = useState('1S');
   const [allData, setAllData] = useState<any[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState('all');
 
   const height = useSharedValue(0);
   const opacity = useSharedValue(0);
@@ -50,10 +52,6 @@ export default function BalanceHeader() {
     overflow: 'hidden',
   }));
 
-
-  useEffect(() => {
-    setColorSaldo(textColor);
-  }, [textColor]);
 
   // 🔹 Cargar todas las transacciones una sola vez
   useEffect(() => {
@@ -95,8 +93,25 @@ export default function BalanceHeader() {
   useEffect(() => {
     try{
       if (!allData.length) return;
+      const scopedData = selectedAccountId === 'all'
+        ? allData
+        : allData.filter((transaction) =>
+          transaction.cuentaId === selectedAccountId
+          || transaction.cuentaOrigenId === selectedAccountId
+          || transaction.cuentaDestinoId === selectedAccountId
+        );
+      const hasScopedData = scopedData.length > 0;
 
       const now = new Date();
+      const signedAmount = (transaction: any) => {
+        if (transaction.tipo === 'transferencia') {
+          if (selectedAccountId === 'all') return 0;
+          if (transaction.cuentaDestinoId === selectedAccountId) return Number(transaction.monto || 0);
+          if (transaction.cuentaOrigenId === selectedAccountId) return -Number(transaction.monto || 0);
+          return 0;
+        }
+        return transaction.tipo === 'ingreso' ? Number(transaction.monto || 0) : -Number(transaction.monto || 0);
+      };
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       let startDate: Date;
       let labels: string[] = [];
@@ -149,7 +164,7 @@ export default function BalanceHeader() {
 
           case 'Total':
           // splitear en 3 buckets: Inicio / Mitad / Ahora
-          startDate = new Date(allData[allData.length - 1].date); // fecha más antigua en allData (suponiendo orden descendente)
+          startDate = hasScopedData ? new Date(scopedData[scopedData.length - 1].date) : new Date(startOfToday);
           labels = ['Inicio','Mitad','Ahora'];
           break;
 
@@ -164,13 +179,13 @@ export default function BalanceHeader() {
       }
 
       // Filtramos transacciones dentro del rango (si startDate es null usamos todo)
-      const filtered = startDate ? allData.filter(t => t.date >= startDate && t.date <= now) : allData.slice();
+      const filtered = startDate ? scopedData.filter(t => t.date >= startDate && t.date <= now) : scopedData.slice();
 
       // total global (puedes seguir mostrando total de todo time)
-      const totalCalc = allData.reduce((acc, t) => acc + (t.tipo === 'ingreso' ? t.monto : -t.monto), 0);
+      const totalCalc = scopedData.reduce((acc, t) => acc + signedAmount(t), 0);
 
       // diferencia en el rango
-      const diff = filtered.reduce((acc, t) => acc + (t.tipo === 'ingreso' ? t.monto : -t.monto), 0);
+      const diff = filtered.reduce((acc, t) => acc + signedAmount(t), 0);
       const prevTotal = totalCalc - diff;
       const perc = prevTotal !== 0 ? (diff / prevTotal) * 100 : 0;
 
@@ -201,8 +216,8 @@ export default function BalanceHeader() {
           }
           if (range === 'Total') {
           // mapa proporcional entre startDate (fecha más vieja) y now
-          const first = new Date(allData[allData.length - 1].date).getTime();
-          const last = new Date(allData[0].date).getTime();
+          const first = hasScopedData ? new Date(scopedData[scopedData.length - 1].date).getTime() : now.getTime();
+          const last = hasScopedData ? new Date(scopedData[0].date).getTime() : now.getTime();
           const pos = (date.getTime() - first) / Math.max(1, (last - first));
           const idx = Math.floor(pos * (labels.length - 1));
           return Math.max(0, Math.min(labels.length - 1, idx));
@@ -214,7 +229,7 @@ export default function BalanceHeader() {
       filtered.forEach(t => {
           const d = new Date(t.date);
           const idx = indexForDate(d);
-          buckets[idx] += (t.tipo === 'ingreso' ? t.monto : -t.monto);
+          buckets[idx] += signedAmount(t);
       });
 
       // Asegurar que el último label represente hoy (si por alguna razón no coincide, lo forzamos)
@@ -222,9 +237,6 @@ export default function BalanceHeader() {
       // Ya labels están en orden cronológico: oldest .. today
 
       // Finalmente actualizamos estados
-      if(totalCalc < 0){
-          setColorSaldo('#ff4d4d');
-      }
       setTotal(totalCalc);
       setDiferencia(diff);
       setCambio(perc);
@@ -233,7 +245,7 @@ export default function BalanceHeader() {
     }catch(e){
       console.error("Error en useEffect de procesamiento de datos:", e);
     }
-  }, [range, allData, user]);
+  }, [range, allData, selectedAccountId, user]);
 
   const chartConfig = {
     backgroundGradientFrom: cardsColor,
@@ -263,10 +275,20 @@ export default function BalanceHeader() {
       }}
     >
       {/* --- Fila superior --- */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ width: '100%', marginBottom: 5 }}>
+        <TouchableOpacity onPress={() => setSelectedAccountId('all')} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, backgroundColor: selectedAccountId === 'all' ? 'rgba(120,82,255,0.2)' : 'transparent' }}>
+          <ThemedText style={{ fontSize: RFValue(10) }}>Todas</ThemedText>
+        </TouchableOpacity>
+        {accounts.filter((account) => account.activo !== false).map((account) => (
+          <TouchableOpacity key={account.id} onPress={() => setSelectedAccountId(account.id)} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, backgroundColor: selectedAccountId === account.id ? 'rgba(120,82,255,0.2)' : 'transparent' }}>
+            <ThemedText style={{ fontSize: RFValue(10) }}>{account.nombre}</ThemedText>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%' }}>
         <View style={{width:'85%'}}>
           <ThemedText style={{ fontSize: RFValue(12), color: '#aaa', marginBottom: 4 }}>
-            Saldo total
+            Balance de movimientos · {selectedAccountId === 'all' ? 'todas' : accounts.find((account) => account.id === selectedAccountId)?.nombre || 'cuenta'}
           </ThemedText>
           {loading ? (
             <ActivityIndicator color={textColor} />
@@ -275,7 +297,7 @@ export default function BalanceHeader() {
               style={{
                 fontSize: RFValue(25),
                 fontWeight: '700',
-                color: colorSaldo,
+                color: total < 0 ? '#ff4d4d' : textColor,
                 padding:5,
               }}
             >

@@ -10,7 +10,9 @@ import {
   Alert,
   Animated,
   BackHandler,
+  Dimensions,
   Linking,
+  Image,
   Modal,
   NativeModules,
   Platform,
@@ -34,6 +36,7 @@ import { useAppTheme } from '@/hooks/ThemeContext';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { useTransactions } from '@/hooks/useTransactions';
 
+import AccountSummaryCard from '@/components/AccountSummaryCard';
 import BalanceHeader from '@/components/BalanceHeader';
 import BudgetHeader from '@/components/BudgetHeader';
 import CardComparativa from "@/components/ComparacionUsers";
@@ -48,11 +51,13 @@ import QuickAccessPanel from '@/components/QuickAccessPanel';
 import ResumenRapido from '@/components/ResumenRapido';
 import RiesgoPresupuestoCard from '@/components/RiesgoPresupuestoCard';
 import SaludFinancieraCard from '@/components/SaludFinancieraCard';
+import { DEFAULT_ACCOUNT_ID } from '@/services/accounts';
 import { actualizarPreciosUsuario } from '@/services/cryptoService';
 import CryptoPortfolioCard from '../../components/CryptoPortfolioCard';
 
 
 const HOME_SECTIONS_DEFAULT: HomeSectionKey[] = [
+  'accounts',
   'quick-access',
   'group-quick-access',
   'favorite-charts',
@@ -81,34 +86,34 @@ const isSupportSubscriptionActive = (support: any) => {
 
 const ONBOARDING_STEPS = [
   {
-    icon: 'sparkles-outline' as const,
-    title: 'Bienvenido a Konta',
-    description: 'Te ayudamos a registrar ingresos, egresos y metas de ahorro sin complicarte.',
+    target: 'profile',
+    icon: 'person-outline' as const,
+    title: 'Tu perfil y ajustes',
+    description: 'Toca tu foto o avatar para editar tu perfil, preferencias y configuración de la aplicación.',
   },
   {
-    icon: 'flash-outline' as const,
-    title: 'Accesos rápidos y widgets',
-    description: 'Crea acciones frecuentes para registrar movimientos en un toque desde Inicio o desde tus widgets.',
+    target: 'controls',
+    icon: 'apps-outline' as const,
+    title: 'Navegación rápida',
+    description: 'Busca información, revisa notificaciones y abre tu centro de cuentas desde estos tres accesos.',
   },
   {
+    target: 'balance',
     icon: 'wallet-outline' as const,
-    title: 'Presupuestos y control',
-    description: 'Asocia gastos a categorías para ver cuánto llevas y mantenerte dentro de tus límites.',
+    title: 'Balance principal',
+    description: 'Aquí ves tu dinero total y el resumen de tus cuentas, metas y patrimonio.',
   },
   {
-    icon: 'bar-chart-outline' as const,
-    title: 'Historial y progreso',
-    description: 'Revisa tendencias, filtra periodos y sigue tu racha para mejorar tus hábitos financieros.',
+    target: 'add',
+    icon: 'add-circle-outline' as const,
+    title: 'Registrar movimiento',
+    description: 'Usa este botón para agregar ingresos, gastos o transferencias de forma rápida.',
   },
   {
-    icon: 'school-outline' as const,
-    title: 'Sobre el creador',
-    description: 'Me presento, mi nombre es César Alnair, tengo 18 años y estoy por entrar a la universidad. Empecé esta app para poder tener control sobre mis finanzas. Pero ahora quiero que todos puedan beneficiarse. Tu apoyo me ayudaría muchísimo a mi economía, y a cambio, prometo traer actualizaciones de vez en cuando.',
-  },
-  {
-    icon: 'gift-outline' as const,
-    title: 'Prueba gratis de 7 días',
-    description: 'Prueba todas las funciones premium gratis durante 7 días, al completar una racha de 3 días.',
+    target: 'sections',
+    icon: 'grid-outline' as const,
+    title: 'Secciones personalizables',
+    description: 'Desliza para descubrir tus cuentas, ahorros, accesos rápidos, presupuestos y más.',
   },
   {
     icon: 'heart-outline' as const,
@@ -129,6 +134,7 @@ export default function Inicio() {
   const iconColor = useThemeColor({ light: '', dark: '' }, 'icon');
 
   const [user, setUser] = useState<User | null>(null);
+  const [favoriteAccountId, setFavoriteAccountId] = useState(DEFAULT_ACCOUNT_ID);
   const [authResolved, setAuthResolved] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [isHeaderHidden, setIsHeaderHidden] = useState(false);
@@ -184,6 +190,7 @@ export default function Inicio() {
   const [showAddQuickActionsWidgetPrompt, setShowAddQuickActionsWidgetPrompt] = useState(false);
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
+  const [onboardingTarget, setOnboardingTarget] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [subscriptionActive, setSubscriptionActive] = useState<boolean | null>(null);
   const [subscriptionLoaded, setSubscriptionLoaded] = useState<boolean | null>(null);
   const [trialOfferClaimed, setTrialOfferClaimed] = useState(false);
@@ -203,11 +210,31 @@ export default function Inicio() {
   };
 
   const scrollY = useRef(new Animated.Value(0)).current;
+  const homeScrollRef = useRef<any>(null);
   const celebrationAnim = useRef(new Animated.Value(0)).current;
   const cardPulseAnim = useRef(new Animated.Value(1)).current;
   const confettiAnims = useRef(Array.from({ length: 20 }, () => new Animated.Value(0))).current;
   const lastMilestoneRef = useRef<number | null>(null);
   const weeklyTargetSeenRef = useRef(false);
+  const tourRefs = {
+    profile: useRef<View>(null),
+    controls: useRef<View>(null),
+    balance: useRef<View>(null),
+    add: useRef<View>(null),
+    sections: useRef<View>(null),
+  };
+
+  const measureOnboardingTarget = () => {
+    const target = ONBOARDING_STEPS[onboardingStep]?.target as keyof typeof tourRefs | undefined;
+    const node = target ? tourRefs[target].current : null;
+    if (!node) {
+      setOnboardingTarget(null);
+      return;
+    }
+    node.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) setOnboardingTarget({ x, y, width, height });
+    });
+  };
 
   const headerOpacity = scrollY.interpolate({
     inputRange: [0, 40],
@@ -256,24 +283,43 @@ export default function Inicio() {
   }, []);
 
   useEffect(() => {
+    if (!user?.uid) {
+      setFavoriteAccountId(DEFAULT_ACCOUNT_ID);
+      return;
+    }
+    return onSnapshot(
+      doc(db, 'users', user.uid),
+      (snapshot) => setFavoriteAccountId(String(snapshot.data()?.cuentaFavoritaId || DEFAULT_ACCOUNT_ID)),
+      (error) => console.error('Error cargando cuenta favorita:', error),
+    );
+  }, [user?.uid]);
+
+  useEffect(() => {
     if (!authResolved) return;
 
     const loadOnboarding = async () => {
-      try {
-        const storageScope = user?.uid || 'device';
-        const key = `konta.onboarding.v1.${storageScope}`;
-        const seen = await AsyncStorage.getItem(key);
-        if (seen === 'true') return;
-
-        setOnboardingStep(0);
-        setShowOnboardingModal(true);
-      } catch (error) {
-        console.log('No se pudo cargar onboarding:', error);
+      const storageScope = user?.uid || 'device';
+      const seen = await AsyncStorage.getItem(`konta.onboarding.v2.${storageScope}`);
+      if (seen === 'true') {
+        setShowOnboardingModal(false);
+        return;
       }
+      setOnboardingStep(0);
+      setShowOnboardingModal(true);
     };
 
     loadOnboarding();
   }, [authResolved, user?.uid]);
+
+  useEffect(() => {
+    if (!showOnboardingModal) return;
+    const target = ONBOARDING_STEPS[onboardingStep]?.target;
+    if (target === 'sections') {
+      homeScrollRef.current?.scrollTo?.({ y: 260, animated: true });
+    }
+    const timer = setTimeout(measureOnboardingTarget, target === 'sections' ? 500 : 180);
+    return () => clearTimeout(timer);
+  }, [showOnboardingModal, onboardingStep, homeSectionsConfig.length]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -751,6 +797,7 @@ export default function Inicio() {
         descripcion: item.nombre || 'Movimiento rápido',
         monto: Number(item.montoDefault || 0),
         tipo: item.tipo,
+        cuentaId: favoriteAccountId || DEFAULT_ACCOUNT_ID,
         fecha: new Date(),
         presupuestoCategoria: item.presupuestoCategoria || null,
         preestablecidoMainId: item.mainId || null,
@@ -869,6 +916,7 @@ export default function Inicio() {
       const timestamp = Timestamp.now();
       batch.set(parentRef, {
         tipo: 'egreso',
+        cuentaId: favoriteAccountId || DEFAULT_ACCOUNT_ID,
         monto: total,
         descripcion: group.nombre,
         categoria: 'grupo',
@@ -942,6 +990,7 @@ export default function Inicio() {
         descripcion: action.subNombre || action.descripcion || 'Movimiento widget',
         monto: Number(action.monto || 0),
         tipo: action.tipo === 'egreso' ? 'egreso' : 'ingreso',
+        cuentaId: action.cuentaId || DEFAULT_ACCOUNT_ID,
         fecha: new Date(),
         presupuestoCategoria: action.presupuestoCategoria || null,
         preestablecidoMainId: action.mainId || null,
@@ -1072,7 +1121,7 @@ export default function Inicio() {
   const persistOnboardingSeen = async () => {
     try {
       const storageScope = user?.uid || 'device';
-      const key = `konta.onboarding.v1.${storageScope}`;
+      const key = `konta.onboarding.v2.${storageScope}`;
       await AsyncStorage.setItem(key, 'true');
     } catch (error) {
       console.log('No se pudo guardar onboarding:', error);
@@ -1247,6 +1296,7 @@ export default function Inicio() {
     const fallback = preestablecidosRapidos.slice(0, 3);
     const widgetActions = (starred.length > 0 ? starred : fallback).slice(0, 3).map((item: any) => ({
       tipo: item.tipo,
+      cuentaId: favoriteAccountId || DEFAULT_ACCOUNT_ID,
       monto: Number(item.montoDefault || 0),
       presupuestoCategoria: item.presupuestoCategoria || '',
       subNombre: item.nombre || '',
@@ -1312,6 +1362,10 @@ export default function Inicio() {
           onQuickLongPress={openQuickInModal}
         />
       );
+    }
+
+    if (section === 'accounts') {
+      return <AccountSummaryCard />;
     }
 
     if (section === 'group-quick-access') {
@@ -1749,30 +1803,39 @@ export default function Inicio() {
     return () => scrollY.removeListener(listener);
   }, [scrollY]);
 
-  const isLongDisplayName = String(user?.displayName || 'Usuario').trim().length > 12;
   const headerGreeting = (
-    <View style={{ padding: 5, flexDirection: 'row', alignItems: 'center' }}>
-      {subscriptionActive && (
-        <Ionicons name="diamond" size={20} color="#16a34a" style={{ marginRight: 8 }} />
-      )}
-      <ThemedText adjustsFontSizeToFit={true} numberOfLines={1} minimumFontScale={0.9} style={{ fontSize: 30, fontWeight: '800', color: subscriptionActive ? '#16a34a' : textColor, width: isLongDisplayName ? 300 : 200 }}>
-        Hola {user ? user.displayName : 'Usuario'}
+    <View ref={tourRefs.profile} style={{ padding: 5, flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 }}>
+      <TouchableOpacity onPress={() => router.push({ pathname: '/(screens)/Settings' })} accessibilityLabel="Abrir perfil y ajustes" style={{ marginRight: 10 }}>
+        {user?.photoURL ? (
+          <Image source={{ uri: user.photoURL }} style={{ width: 42, height: 42, borderRadius: 21 }} />
+        ) : (
+          <Ionicons name="person-circle-outline" size={42} color={primaryColor} />
+        )}
+      </TouchableOpacity>
+      <ThemedText numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 24, fontWeight: '800', color: textColor, flex: 1, minWidth: 0 }}>
+        {user?.displayName || 'Usuario'}
       </ThemedText>
     </View>
   );
   const headerControls = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, bottom: 5 }}>
+    <View ref={tourRefs.controls} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, bottom: 5 }}>
       <TouchableOpacity disabled={isHeaderHidden} onPress={() => router.push('/(screens)/GlobalSearchScreen')} accessibilityLabel="Buscar en Konta" accessibilityHint="Busca transacciones, grupos, metas y recurrentes" style={{ padding: 6 }}>
         <Ionicons name="search-outline" size={23} color={textColor} />
       </TouchableOpacity>
       <TouchableOpacity disabled={isHeaderHidden} onPress={() => router.push('/(screens)/NotificationCenterScreen')} accessibilityLabel="Abrir actividad" style={{ padding: 6 }}>
         <Ionicons name="notifications-outline" size={23} color={textColor} />
       </TouchableOpacity>
-      <TouchableOpacity disabled={isHeaderHidden} onPress={() => router.push("/(screens)/Settings")} accessibilityLabel="Abrir ajustes" style={{ padding: 6 }}>
-        <Ionicons name="settings" size={25} color={textColor} />
+      <TouchableOpacity disabled={isHeaderHidden} onPress={() => router.push('/(screens)/AccountsScreen')} accessibilityLabel="Abrir cuentas y patrimonio" style={{ padding: 6 }}>
+        <Ionicons name="card-outline" size={25} color={textColor} />
       </TouchableOpacity>
     </View>
   );
+  const onboardingWindowHeight = Dimensions.get('window').height;
+  const onboardingCardTop = onboardingTarget
+    ? onboardingTarget.y > onboardingWindowHeight * 0.48
+      ? 24
+      : Math.min(onboardingTarget.y + onboardingTarget.height + 16, onboardingWindowHeight - 360)
+    : 180;
 
   return (
     <ThemedView style={styles.container}>
@@ -1783,16 +1846,28 @@ export default function Inicio() {
           style={{
             ...StyleSheet.absoluteFill,
             zIndex: 60,
-            backgroundColor: 'rgba(6, 8, 20, 0.64)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            paddingHorizontal: 16,
+            backgroundColor: 'transparent',
+            justifyContent: 'flex-start',
+            alignItems: 'stretch',
           }}
         >
+          {onboardingTarget ? (
+            <>
+              <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: Math.max(0, onboardingTarget.y - 8), backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: onboardingTarget.y - 8, left: 0, width: Math.max(0, onboardingTarget.x - 8), height: onboardingTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: onboardingTarget.y - 8, right: 0, width: Math.max(0, Dimensions.get('window').width - onboardingTarget.x - onboardingTarget.width - 8), height: onboardingTarget.height + 16, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: onboardingTarget.y + onboardingTarget.height + 8, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: onboardingTarget.y - 8, left: onboardingTarget.x - 8, width: onboardingTarget.width + 16, height: onboardingTarget.height + 16, borderRadius: 14, borderWidth: 2, borderColor: primaryColor, shadowColor: primaryColor, shadowOpacity: 0.9, shadowRadius: 12, elevation: 12 }} />
+            </>
+          ) : (
+            <View pointerEvents="none" style={{ ...StyleSheet.absoluteFill, backgroundColor: 'rgba(6, 8, 20, 0.72)' }} />
+          )}
           <ThemedView
             style={{
-              width: '100%',
-              maxWidth: 420,
+              position: 'absolute',
+              top: onboardingCardTop,
+              left: 16,
+              right: 16,
               borderRadius: 22,
               padding: 18,
               borderWidth: 1,
@@ -2034,25 +2109,20 @@ export default function Inicio() {
           alignSelf: "flex-start",
           zIndex: 10,
           justifyContent: "space-between",
-          flexDirection: isLongDisplayName ? 'column' : 'row',
-          alignItems: isLongDisplayName ? 'stretch' : 'center',
+          flexDirection: 'row',
+          alignItems: 'center',
           width: "94%",
           opacity: headerOpacity,
           transform: [{ translateY: headerTranslateY }],
         }}
       >
-        {isLongDisplayName ? (
-          <>
-            <View style={{ alignItems: 'flex-end' }}>{headerControls}</View>
-            {headerGreeting}
-          </>
-        ) : (
-          <>{headerGreeting}{headerControls}</>
-        )}
+        {headerGreeting}
+        <View style={{ flexShrink: 0 }}>{headerControls}</View>
       </Animated.View>
 
       {/* 🔹 ScrollView animado */}
       <Animated.ScrollView
+        ref={homeScrollRef}
         style={{ width: "100%", zIndex: 9, marginTop: -80 }}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -2241,7 +2311,9 @@ export default function Inicio() {
             </ThemedView>
           )}
 
-          <BalanceHeader />
+          <View ref={tourRefs.balance} collapsable={false} style={{ width: '100%', alignItems: 'center' }}>
+            <BalanceHeader />
+          </View>
 
           <TouchableOpacity
             onPress={handleOpenOrderCustomization}
@@ -2252,9 +2324,11 @@ export default function Inicio() {
             <Ionicons name="options-outline" size={22} color={primaryColor} />
           </TouchableOpacity>
 
-          {homeSectionsConfig.filter((item) => item.visible).map((item) => (
-            <React.Fragment key={item.key}>{renderHomeSection(item.key)}</React.Fragment>
-          ))}
+          <View ref={tourRefs.sections} collapsable={false} style={{ width: '100%', alignItems: 'center' }}>
+            {homeSectionsConfig.filter((item) => item.visible).map((item) => (
+              <React.Fragment key={item.key}>{renderHomeSection(item.key)}</React.Fragment>
+            ))}
+          </View>
 
           {/* Quick access permanece visible si hay promo pendiente aunque el usuario oculto la seccion */}
           {!homeSectionsConfig.some((item) => item.key === 'quick-access' && item.visible) && preestablecidosRapidos.length === 0 && !quickAccessPromoDismissed && (
@@ -2274,6 +2348,7 @@ export default function Inicio() {
 
       {/* 🔹 Botón flotante */}
       <TouchableOpacity
+        ref={tourRefs.add}
         onPress={() => setModalVisible(true)}
         style={{
           position: "absolute",
